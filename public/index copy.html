@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vega CE and PE Sums</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+</head>
+<body>
+    <div style="width: 80%; margin: auto;">
+        <canvas id="vegaChart"></canvas>
+    </div>
+
+    <script>
+        async function fetchData() {
+            const response = await fetch('/api/data');
+            const data = await response.json();
+            return data;
+        }
+
+        async function plotChart() {
+            const dataStore = await fetchData();
+
+            const ctx = document.getElementById('vegaChart').getContext('2d');
+            const vegaChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dataStore.timestamps,
+                    datasets: [
+                        {
+                            label: 'Vega CE Sum',
+                            data: dataStore.vega_ce_sums,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        },
+                        {
+                            label: 'Vega PE Sum',
+                            data: dataStore.vega_pe_sums,
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Timestamp'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Sum'
+                            }
+                        }
+                    },
+                    plugins: {
+                        zoom: {
+                            zoom: {
+                                wheel: {
+                                    enabled: true // Enable zooming with the mouse wheel
+                                },
+                                pinch: {
+                                    enabled: true // Enable zooming with pinch gestures
+                                },
+                                mode: 'x', // Allow zooming on the x-axis
+                            },
+                            pan: {
+                                enabled: true,
+                                mode: 'x', // Allow panning on the x-axis
+                            }
+                        }
+                    }
+                }
+            });
+
+            function updateChart() {
+                fetchData().then(newData => {
+                    vegaChart.data.labels = newData.timestamps;
+                    vegaChart.data.datasets[0].data = newData.vega_ce_sums;
+                    vegaChart.data.datasets[1].data = newData.vega_pe_sums;
+                    vegaChart.update();
+                });
+            }
+
+            // Update chart every 30 seconds
+            setInterval(updateChart, 30000);
+        }
+
+        plotChart();
+    </script>
+</body>
+</html>

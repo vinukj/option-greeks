@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Options Data</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+    </style>
+</head>
+<body>
+    <h1>Options Data</h1>
+    
+    <h2>CE Volumes</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Strike Price</th>
+                <th>Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% data.strike_list_ce.forEach((strike, index) => { %>
+                <tr>
+                    <td><%= strike.strike_price %></td>
+                    <td><%= data.ce_volume[index] %></td>
+                </tr>
+            <% }) %>
+        </tbody>
+    </table>
+
+    <h2>PE Volumes</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Strike Price</th>
+                <th>Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% data.strike_list_pe.forEach((strike, index) => { %>
+                <tr>
+                    <td><%= strike.strike_price %></td>
+                    <td><%= data.pe_volume[index] %></td>
+                </tr>
+            <% }) %>
+        </tbody>
+    </table>
+</body>
+</html>

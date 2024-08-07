@@ -1,0 +1,38 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #f1f1f1;
+}
+
+.chart-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr); /* 2 columns on desktop */
+    gap: 20px; /* Space between charts */
+    padding: 20px;
+    max-width: 100%; /* Ensure container width doesn't exceed viewport */
+    box-sizing: border-box; /* Include padding and border in the width calculation */
+}
+
+.chart {
+    width: 100%; /* Make the canvas fit the container width */
+    height: 350px; /* Maintain aspect ratio */
+    width: 400px;
+    display: block; /* Remove any extra space below the canvas */
+    max-height: 350px; /* Reduce max height to fit 4 canvases in 2x2 layout */
+    box-sizing: border-box; /* Include padding and border in the width calculation */
+}
+
+@media (max-width: 768px) {
+    .chart-container {
+        grid-template-columns: 1fr; /* Stack charts in 1 column on smaller screens */
+        max-width: 90%; /* Ensure container width doesn't exceed viewport */
+    }
+}
