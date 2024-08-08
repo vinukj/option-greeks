@@ -307,3 +307,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+
+//Export data
+document.getElementById('export-button').addEventListener('click', () => {
+    const index = document.getElementById('index-select').value;
+    const date = document.getElementById('date-select').value;
+
+    if (!date) {
+        alert('Please select a date.');
+        return;
+    }
+
+    const url = `/api/export-data?index=${index}&date=${date}`;
+    window.location.href = url;
+});

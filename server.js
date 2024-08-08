@@ -1,16 +1,23 @@
 const express = require('express');
 const axios = require('axios');
-require('dotenv').config();
+const dotenv = require('dotenv');
+const path = require('path'); // Add this line
 const app = express();
 const sqlite3 = require('sqlite3').verbose();
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+require('dotenv').config();
 
-const YOUR_ACCESS_TOKEN = process.env.ACCESS_TOKEN;
-const AUTHBEARERTOKEN = "Bearer " + process.env.ACCESS_TOKEN;
-const YOUR_WS_TOKEN = process.env.WS_TOKEN;
+const YOUR_ACCESS_TOKEN = process.env.accessToken;
+const AUTHBEARERTOKEN = "Bearer " + process.env.accessToken;
+const YOUR_WS_TOKEN = process.env.wsToken;
+const DAYS_TO_EXPIRE = parseFloat(process.env.daysToExpire);
 
 const port = 3005;
 app.use(express.json());
-app.use(express.static('public'));
+//app.use(express.static('public'));
+// Serve static files from the 'public' directory
+app.use(express.static(__dirname + '/public'));
 
 let firstPrintDone = {
     NIFTY: false,
@@ -18,6 +25,15 @@ let firstPrintDone = {
     FINNIFTY: false,
     MIDCPNIFTY: false
 };
+
+if (!isNaN(DAYS_TO_EXPIRE)) {
+    // Use daysToExpire as a number
+    console.log(`Days to expire: ${DAYS_TO_EXPIRE}`);
+  } else {
+    // Handle the error case
+    console.error('Invalid number for daysToExpire');
+  }
+
 
 const getTodayDate = () => {
     const today = new Date();
@@ -113,19 +129,30 @@ const insertData = (db, tableName, dataToInsert) => {
     ]);
 };
 
-
 // Function to fetch options data from the endpoint
 const fetchOptionsData = async (name, expiry) => {
     try {
+        const now = new Date();
+        const startTime = new Date();
+        startTime.setHours(9, 15, 0, 0);
+        const endTime = new Date();
+        endTime.setHours(15, 35, 0, 0);
+
+        if (now < startTime || now > endTime) {
+            console.log(`Current time ${now} is outside trading hours for ${name}`);
+            return;
+        }
+
         const response = await axios.post('https://beta.inuvest.tech/backtest/getComputedValue/', {
             "name": name,
             "expiry": expiry,
             "limit": process.env.STRIKES,
             "exchange": process.env.EXCHANGE,
-            "access_token": YOUR_ACCESS_TOKEN,
-            "days_to_expire": 0.006213051877219686,
+            "access_token": process.env.accessToken,
+            "days_to_expire": DAYS_TO_EXPIRE,
             "user_id": process.env.USERID,
-            "ws_token": YOUR_WS_TOKEN
+            "ws_token": process.env.wsToken
+
         }, {
             headers: {
                 'Content-Type': 'application/json',
@@ -181,17 +208,7 @@ const fetchOptionsData = async (name, expiry) => {
         const timestamp = new Date().toLocaleTimeString();
         const date_inserted = getTodayDate(); // Add this line to set the date_inserted
 
-        // console.log(`ATM Value (${name}): `, atmvalue);
-        // console.log(`Position of ATM value (${name}):`, position);
-        // console.log(`Timestamp (${name}): `, timestamp);
-        // console.log(`Vega CE Sum from ATM to OTM (${name}):`, vega_ce_sum);
-        // console.log(`Vega PE Sum from ATM to OTM (${name}):`, vega_pe_sum);
-
-        // Check if the current time is after 9:30 AM
-        // const baseline_start_time = new Date();
-        // baseline_start_time.setHours(11, 55, 0, 0);
-
-        if (!firstPrintDone[name] && new Date() >= baselineStartTime) {
+        if (!firstPrintDone[name] && now >= baselineStartTime) {
             console.log(`First Vega CE Sum after Baseline Time: ${vega_ce_sum} for ${name}`);
             console.log(`First Vega PE Sum after Baseline Time: ${vega_pe_sum} for ${name}`);
             console.log(`First Theta CE Sum after Baseline Time: ${theta_ce_sum} for ${name}`);
@@ -211,14 +228,12 @@ const fetchOptionsData = async (name, expiry) => {
             firstPrintDone[name] = true;
         }
 
-
         const diff_vega_ce = baseline[name].baseline_vega_ce !== 0 ? vega_ce_sum - baseline[name].baseline_vega_ce : 0;
         const diff_vega_pe = baseline[name].baseline_vega_pe !== 0 ? vega_pe_sum - baseline[name].baseline_vega_pe : 0;
         const diff_theta_ce = baseline[name].baseline_theta_ce !== 0 ? theta_ce_sum - baseline[name].baseline_theta_ce : 0;
         const diff_theta_pe = baseline[name].baseline_theta_pe !== 0 ? theta_pe_sum - baseline[name].baseline_theta_pe : 0;
         const diff_gamma_ce = baseline[name].baseline_gamma_ce !== 0 ? gamma_ce_sum - baseline[name].baseline_gamma_ce : 0;
         const diff_gamma_pe = baseline[name].baseline_gamma_pe !== 0 ? gamma_pe_sum - baseline[name].baseline_gamma_pe : 0;
-
 
         const dataToInsert = {
             timestamp,
@@ -281,40 +296,84 @@ const fetchOptionsData = async (name, expiry) => {
         console.log(`Data inserted successfully into ${name}.db`);
 
     } catch (error) {
-        console.error('Error fetching options data for ${name}:, error');
+        console.error(`Error fetching options data for ${name}:`, error);
     }
 };
-
 
 const isPastCutoffTime = () => {
     const now = new Date();
     const cutoffTime = new Date();
-    cutoffTime.setHours(15, 40, 0, 0); // 3:40 PM
+    cutoffTime.setHours(15, 35, 0, 0); // 3:35 PM
     return now >= cutoffTime;
 };
 
 const startFetchingData = (name, expiry) => {
-    const intervalId = setInterval(() => {
-        if (isPastCutoffTime()) {
-            clearInterval(intervalId);
-            console.log(`Stopped fetching data for ${name}`);
-        } else {
-            fetchOptionsData(name, expiry);
-        }
-    }, 30000);
-    fetchOptionsData(name, expiry); // Fetch immediately
+    const now = new Date();
+    const startTime = new Date();
+    startTime.setHours(9, 15, 0, 0); // 9:15 AM
+
+    const timeUntilStart = startTime - now;
+    const intervalDuration = 30000; // 30 seconds
+
+    if (timeUntilStart > 0) {
+        console.log(`Waiting until 9:15 AM to start fetching data for ${name}`);
+        setTimeout(() => {
+            const intervalId = setInterval(() => {
+                if (isPastCutoffTime()) {
+                    clearInterval(intervalId);
+                    console.log(`Stopped fetching data for ${name}`);
+                } else {
+                    fetchOptionsData(name, expiry);
+                }
+            }, intervalDuration);
+            fetchOptionsData(name, expiry); // Fetch immediately at 9:15 AM
+        }, timeUntilStart);
+    } else {
+        const intervalId = setInterval(() => {
+            if (isPastCutoffTime()) {
+                clearInterval(intervalId);
+                console.log(`Stopped fetching data for ${name}`);
+            } else {
+                fetchOptionsData(name, expiry);
+            }
+        }, intervalDuration);
+        fetchOptionsData(name, expiry); // Fetch immediately if past 9:15 AM
+    }
 };
 
-// const startFetchingData = (name, expiry) => {
-//         setInterval(() => fetchOptionsData(name, expiry), 30000);
-//         fetchOptionsData(name, expiry);
-// };
+// Update .env file with new settings
+app.post('/update-settings', (req, res) => {
+    const newSettings = req.body;
+    const envPath = path.join(__dirname, '.env');
+
+    // Load current .env file
+    const envConfig = dotenv.parse(fs.readFileSync(envPath));
+
+    // Update settings
+    for (const key in newSettings) {
+        if (newSettings.hasOwnProperty(key)) {
+            envConfig[key] = newSettings[key];
+        }
+    }
+
+    // Write updated settings back to .env file
+    const envContent = Object.keys(envConfig)
+        .map(key => `${key}=${envConfig[key]}`)
+        .join('\n');
+
+    fs.writeFileSync(envPath, envContent);
+
+    // Reload environment variables
+    dotenv.config();
+
+    res.send('Settings updated successfully');
+});
 
 // Start fetching data for each index with the respective expiry
-// startFetchingData('NIFTY', process.env.INDEX_EXPIRY_NIFTY);
-// startFetchingData('BANKNIFTY', process.env.INDEX_EXPIRY_BANKNIFTY);
-// startFetchingData('FINNIFTY', process.env.INDEX_EXPIRY_FINNIFTY);
-// startFetchingData('MIDCPNIFTY', process.env.INDEX_EXPIRY_MIDCPNIFTY);
+startFetchingData('NIFTY', process.env.nifty);
+startFetchingData('BANKNIFTY', process.env.bankNifty);
+startFetchingData('FINNIFTY', process.env.finnifty);
+startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
 
 app.post('/options', (req, res) => {
     const {
@@ -325,7 +384,7 @@ app.post('/options', (req, res) => {
         return res.status(400).send('Name and expiry are required.');
     }
     startFetchingData(name, expiry);
-    res.send('Started fetching data for ${name} with expiry ${expiry}');
+    res.send(`Started fetching data for ${name} with expiry ${expiry}`);
 });
 
 app.get('/api/data', (req, res) => {
@@ -375,15 +434,67 @@ app.get('/api/data', (req, res) => {
 
 app.get('/api/expiry-dates', (req, res) => {
     res.json({
-        NIFTY: process.env.INDEX_EXPIRY_NIFTY,
-        BANKNIFTY: process.env.INDEX_EXPIRY_BANKNIFTY,
-        FINNIFTY: process.env.INDEX_EXPIRY_FINNIFTY,
-        MIDCPNIFTY: process.env.INDEX_EXPIRY_MIDCPNIFTY
+        NIFTY: process.env.nifty,
+        BANKNIFTY: process.env.bankNifty,
+        FINNIFTY: process.env.finnifty,
+        MIDCPNIFTY: process.env.midcpNifty
     });
 });
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
+});
+
+// Export data to excel
+app.get('/api/export-data', async (req, res) => {
+    const {
+        index,
+        date
+    } = req.query;
+
+    if (!index || !date) {
+        return res.status(400).send('Index and date are required.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+
+    db.all(`SELECT * FROM ${index} WHERE date_inserted = ?`, [date], async (err, rows) => {
+        if (err) {
+            console.error(err.message);
+            res.status(500).send('An error occurred while fetching data.');
+            return;
+        }
+
+        if (rows.length === 0) {
+            console.log(`No data found for ${index} on ${date}`);
+            return res.status(404).send('No data found for the selected date.');
+        }
+
+        // Create a new workbook and add a worksheet
+        const workbook = new ExcelJS.Workbook();
+        const worksheet = workbook.addWorksheet('Data');
+
+        // Add column headers
+        worksheet.columns = Object.keys(rows[0]).map(key => ({
+            header: key,
+            key
+        }));
+
+        // Add rows
+        rows.forEach(row => {
+            worksheet.addRow(row);
+        });
+
+        // Write to a buffer
+        const buffer = await workbook.xlsx.writeBuffer();
+
+        // Set headers and send the buffer as a file
+        res.setHeader('Content-Disposition', `attachment; filename=${index}-${date}.xlsx`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+    });
+
+    db.close();
 });
 
 app.listen(port, () => {

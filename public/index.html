@@ -5,12 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <title>Option Greeks Visualizer</title>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
 
 <body>
-    <div class="header">
+ <div class="header">
         <span id="current-date-time"></span>
         <select id="index-select">
             <option value="NIFTY">NIFTY</option>
@@ -18,8 +19,18 @@
             <option value="FINNIFTY">FINNIFTY</option>
             <option value="MIDCPNIFTY">MIDCPNIFTY</option>
         </select>
-         <span id="expiry-date"></span> <!-- New element for displaying expiry date -->
+        <span id="expiry-date"></span>
+        <div class="date-export-group">
+            <label for="date-select">Select Date for Export:</label>
+            <input type="date" id="date-select">
+            <button class="icon-button" id="export-button">
+                <span class="material-icons">file_download</span>
+            </button>
+        </div>
         <a href="referential.html" class="referential-link">Referential</a>
+        <button class="icon-button" id="settings-button">
+            <span class="material-icons">settings</span>
+        </button>
     </div>
     <div class="chart-container">
         <div id="vegaChart"></div>
@@ -27,6 +38,104 @@
         <div id="gammaChart"></div>
         <div id="ltpChart"></div>
     </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Update Settings</h2>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label for="accessToken">Access Token:</label>
+                    <input type="text" id="accessToken" name="accessToken">
+                </div>
+                <div class="form-group">
+                    <label for="wsToken">WS Token:</label>
+                    <input type="text" id="wsToken" name="wsToken">
+                </div>
+                <div class="form-group">
+                    <label for="daysToExpire">Days to Expire:</label>
+                    <input type="text" id="daysToExpire" name="daysToExpire">
+                </div>
+                <div class="form-group">
+                    <label>Index Expiry Dates:</label>
+                    <div class="expiry-group">
+                        <div class="expiry-item">
+                            <label for="nifty">NIFTY:</label>
+                            <input type="date" id="nifty" name="nifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="bankNifty">BANKNIFTY:</label>
+                            <input type="date" id="bankNifty" name="bankNifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="finnifty">FINNIFTY:</label>
+                            <input type="date" id="finnifty" name="finnifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="midcpNifty">MIDCPNIFTY:</label>
+                            <input type="date" id="midcpNifty" name="midcpNifty">
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="btn">Save</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Get modal element
+        var modal = document.getElementById("settings-modal");
+
+        // Get open modal button
+        var btn = document.getElementById("settings-button");
+
+        // Get close button
+        var span = document.getElementsByClassName("close")[0];
+
+        // Open the modal
+        btn.onclick = function () {
+            modal.style.display = "block";
+        }
+
+        // Close the modal
+        span.onclick = function () {
+            modal.style.display = "none";
+        }
+
+        // Close the modal if user clicks outside of it
+        window.onclick = function (event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+
+        // Handle settings form submission
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const settings = {};
+            formData.forEach((value, key) => {
+                settings[key] = value;
+            });
+
+            const response = await fetch('/update-settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            });
+
+            if (response.ok) {
+                alert('Settings updated successfully');
+                modal.style.display = "none";
+            } else {
+                alert('Failed to update settings');
+            }
+        });
+    </script>
+
     <script src="script.js"></script>
 </body>
 
