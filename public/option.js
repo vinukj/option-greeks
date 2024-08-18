@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const valueE = document.getElementById('value-e');
     const valueF = document.getElementById('value-f');
     const signalCell = document.getElementById('signal');
+    const bullSpreadEMA = document.getElementById('bull-spread-ema');
+    const bearSpreadEMA = document.getElementById('bear-spread-ema');
+    
 
     let a, b, c, d, e, f;
 
@@ -39,21 +42,23 @@ document.addEventListener('DOMContentLoaded', function () {
             tableBody.innerHTML = ''; // Clear the table
 
             if (data && data.length) {
-                data.forEach(row => {
+                data.forEach((row, index) => {
                     const tr = document.createElement('tr');
                     const valueChangeHtml = generateValueChangeHtml(row.value, row.changePercentage);
+                    const trend = calculateTrend(data); // Calculate trend based on the rules
                     tr.innerHTML = `
                         <td>${row.strike}</td>
                         <td>${valueChangeHtml}</td>
+                        <td>${index === 2 ? trend : ''}</td> <!-- Show trend only for the ATM row -->
                     `;
                     tableBody.appendChild(tr);
                 });
             } else {
-                tableBody.innerHTML = '<tr><td colspan="2">No data available</td></tr>';
+                tableBody.innerHTML = '<tr><td colspan="3">No data available</td></tr>';
             }
         } catch (error) {
             console.error('Error fetching data:', error);
-            tableBody.innerHTML = '<tr><td colspan="2">Error fetching data</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="3">Error fetching data</td></tr>';
         }
     }
 
@@ -97,22 +102,27 @@ document.addEventListener('DOMContentLoaded', function () {
             if (data) {
                 e = data.e;
                 f = data.f;
+                g = data.bull_spread_ema;
+                h = data.bear_spread_ema;
 
                 valueE.textContent = e.toFixed(2);
                 valueF.textContent = f.toFixed(2);
+                bullSpreadEMA.textContent = g.toFixed(2);
+                bearSpreadEMA.textContent = h.toFixed(2);
 
-                const signal = calculateSignal(a, b, c, d, e, f);
+                const signal = calculateSignal(a, b, c, d, g,h);
                 signalCell.textContent = signal;
             } else {
                 valueE.textContent = 'N/A';
                 valueF.textContent = 'N/A';
                 signalCell.textContent = 'N/A';
+                bullSpreadEMA.textContent = 'N/A';
+                bearSpreadEMA.textContent = 'N/A';
             }
         } catch (error) {
             console.error('Error fetching last live values:', error);
         }
     }
-
     function generateValueChangeHtml(value, changePercentage) {
         const isPositive = changePercentage && parseFloat(changePercentage) > 0;
         const changeClass = isPositive ? 'change-positive' : 'change-negative';
@@ -128,15 +138,76 @@ document.addEventListener('DOMContentLoaded', function () {
         `;
     }
 
-    function calculateSignal(a, b, c, d, e, f) {
-        if (e > a && f < d) {
-            return "Bullish. Buy CE";
-        } else if (f > c && e < b) {
-            return "Bearish. Buy PE";
+
+    let lastSignal = "";  // Store the last signal to detect changes    
+    function calculateSignal(a, b, c, d, g, h) {
+        let newSignal;
+
+        if (g > a && h < d) {
+            newSignal = "Bullish. Buy CE";
+        } else if (h > c && g < b) {
+            newSignal = "Bearish. Buy PE";
         } else {
-            return "No Trend/Momentum";
+            newSignal = "No Trend/Momentum";
         }
+    
+        // Check if the signal has changed and send an alert
+        if (newSignal !== lastSignal) {
+            lastSignal = newSignal;
+            
+            if (newSignal === "Bullish. Buy CE" || newSignal === "Bearish. Buy PE") {
+                sendTelegramAlert(`Signal changed to: ${newSignal}`);
+                io.emit('signalChanged', newSignal);  // Emit a socket event for the frontend
+            }
+        }
+    
+        return newSignal;
     }
+
+
+
+    function calculateTrend(data) {
+        // Assume the data is sorted as ATM-2, ATM-1, ATM, ATM+1, ATM+2
+
+        const trends = [];
+
+        if (data[0].changePercentage > 0 && data[1].changePercentage > 0 && data[2].changePercentage > 0 && data[3].changePercentage > 0 && data[4].changePercentage > 0) {
+            trends.push("Higher Volatility, Watch for Breakout");
+        } else if (data[0].changePercentage < 0 && data[1].changePercentage < 0 && data[2].changePercentage < 0 && data[3].changePercentage < 0 && data[4].changePercentage < 0) {
+            trends.push("Consolidation, Range Bound Movement");
+        } else if (data[0].changePercentage < 0 && data[1].changePercentage < 0 && data[2].changePercentage < 0) {
+            trends.push("Bearish Trend");
+        } else if (data[2].changePercentage < 0 && data[3].changePercentage < 0 && data[4].changePercentage < 0) {
+            trends.push("Bullish Trend");
+        }
+
+        if (data[4].changePercentage > 0) {
+            trends.push("Bullish Bias, Expect Upward Move");
+        }
+        if (data[0].changePercentage > 0) {
+            trends.push("Bearish Bias, Expect Downward Move");
+        }
+
+        return trends.join(', ');
+    }
+
+//Function to send telegram message alerts
+const sendTelegramAlert = (message) => {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+    axios.post(url, {
+        chat_id: chatId,
+        text: message
+    })
+    .then(response => {
+        console.log('Message sent to Telegram');
+    })
+    .catch(error => {
+        console.error('Error sending message to Telegram:', error);
+    });
+};
 
     // Fetch data and initial values when the page loads
     updateData();

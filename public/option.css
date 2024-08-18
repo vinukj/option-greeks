@@ -42,7 +42,7 @@ th {
     background-color: #d9eaf2;
 }
 
-.bcs-header, .bps-header, .signal-header {
+.bcs-header, .bps-header, .ebcs-header, .ebps-header {
     background-color: #d3d3d3;
 }
 
@@ -77,6 +77,28 @@ tbody tr:nth-child(even) {
     margin-left: 4px;
 }
 
-#signal {
+#signal-container {
+    text-align: center;
     font-weight: bold;
+    margin-top: 10px;
+    border-top: 1px solid #ddd;
+    padding-top: 10px;
+}
+
+#signal {
+    font-size: 16px;
+    color: #333;
+    margin: 0 auto;
+}
+
+#straddle-table th:nth-child(2),
+#straddle-table td:nth-child(2) {
+    width: 50%; /* Adjust this percentage to reduce the width of the "Values" column */
+}
+
+#straddle-table th.trend-header,
+#straddle-table td#trend {
+    width: 50%; /* Adjust this percentage to increase the width of the "Trend" column */
+    text-align: center;
+    vertical-align: middle;
 }

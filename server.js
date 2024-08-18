@@ -1,15 +1,18 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
 const axios = require('axios');
 const dotenv = require('dotenv');
-const {
-    exec
-} = require('child_process');
+const { exec } = require('child_process');
 const path = require('path');
-const app = express();
 const sqlite3 = require('sqlite3').verbose();
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 require('dotenv').config();
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
 const YOUR_ACCESS_TOKEN = process.env.accessToken;
 const AUTHBEARERTOKEN = "Bearer " + process.env.accessToken;
@@ -157,50 +160,55 @@ const insertOptionData = (db, tableName, optiondataToInsert) => {
     ]);
 };
 
+
+//Fetching data from Aliceblue 1ly api 
+// Corrected portion of the fetchOptionsData function:
 const fetchOptionsData = async (name, expiry) => {
     try {
-        // const startTimeString = process.env.TRADING_START_TIME ;
-        // const endTimeString = process.env.TRADING_END_TIME ;
+        const startTimeString = process.env.TRADING_START_TIME || '09:14';
+        const endTimeString = process.env.TRADING_END_TIME || '23:32';
 
-        // const [startHour, startMinute] = startTimeString.split(':').map(Number);
-        // const [endHour, endMinute] = endTimeString.split(':').map(Number);
-
-        // const now = new Date();
-
-        // const startTime = new Date();
-        // startTime.setHours(startHour, startMinute, 0, 0);
-
-        // const endTime = new Date();
-        // endTime.setHours(endHour, endMinute, 0, 0);
+        const [startHour, startMinute] = startTimeString.split(':').map(Number);
+        const [endHour, endMinute] = endTimeString.split(':').map(Number);
 
         const now = new Date();
-        const startTime = new Date();
-        startTime.setHours(8, 10, 0, 0);
-        const endTime = new Date();
-        endTime.setHours(23, 59, 0, 0);
 
+        const startTime = new Date();
+        startTime.setHours(startHour, startMinute, 0, 0);
+
+        const endTime = new Date();
+        endTime.setHours(endHour, endMinute, 0, 0);
 
         if (now < startTime || now > endTime) {
             console.log(`Current time ${now} is outside trading hours for ${name}`);
             return;
         }
 
-        const response = await axios.post('https://beta.inuvest.tech/backtest/getComputedValue/', {
-            "name": name,
-            "expiry": expiry,
-            "limit": process.env.STRIKES,
-            "exchange": process.env.EXCHANGE,
-            "access_token": process.env.accessToken,
-            "days_to_expire": DAYS_TO_EXPIRE,
-            "user_id": process.env.USERID,
-            "ws_token": process.env.wsToken
-        }, {
+        // Define the requestData object before using it
+        const requestData = {
+            name: name,
+            expiry: expiry,
+            limit: process.env.STRIKES,
+            exchange: process.env.EXCHANGE,
+            access_token: process.env.accessToken,
+            days_to_expire: DAYS_TO_EXPIRE,
+            user_id: process.env.USERID,
+            ws_token: process.env.wsToken
+        };
+
+
+        // Add console.log to see the request parameters being sent
+       // console.log('Request Parameters:', requestData);
+
+        const response = await axios.post('https://beta.inuvest.tech/backtest/getComputedValue/', requestData, {
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': AUTHBEARERTOKEN
             }
-        });
+        });        
 
+
+        //console.log("Responseeee " ,response);
         const strikeList = response.data.strike_list;
         const atmvalue = response.data.atm_values.strike_price;
         const vegaCE = response.data.greeks.vega_ce;
@@ -212,25 +220,7 @@ const fetchOptionsData = async (name, expiry) => {
         const ltpCE = response.data.ltp_ce_list;
         const ltpPE = response.data.ltp_pe_list;
 
-        const position = findAtmPosition(strikeList, atmvalue);
-
-        const vega_ce_sum = sumFromStartPosition(vegaCE, position - 1);
-        const vega_pe_sum = sumToPosition(vegaPE, position);
-        const theta_ce_sum = sumFromStartPosition(thetaCE, position - 1);
-        const theta_pe_sum = sumToPosition(thetaPE, position);
-        const gamma_ce_sum = sumFromStartPosition(gammaCE, position - 1);
-        const gamma_pe_sum = sumToPosition(gammaPE, position);
-
-        const ltp_ce_sum = calculateAverage(position - 1, 5, ltpCE, 'downwards');
-        const ltp_pe_sum = calculateAverage(position + 1, 5, ltpPE, 'upwards');
-
-        const timestamp = new Date().toLocaleTimeString();
-        const date_inserted = getTodayDate();
-
-        const bull_spread = BullSpread(ltpCE, position);
-        const bear_spread = BearSpread(ltpPE, position);
-        const straddleValues = Straddle(ltpCE, ltpPE, position);
-
+        // Ensure helper functions are defined before usage
         function findAtmPosition(strikeList, atmvalue) {
             const index = strikeList.findIndex(strike => strike === atmvalue);
             return index !== -1 ? index : 'ATM value not found in strike list';
@@ -308,14 +298,31 @@ const fetchOptionsData = async (name, expiry) => {
             }
         }
 
-        if (!firstPrintDone[name] && now >= baselineStartTime) {
-            console.log(`First Vega CE Sum after Baseline Time: ${vega_ce_sum} for ${name}`);
-            console.log(`First Vega PE Sum after Baseline Time: ${vega_pe_sum} for ${name}`);
-            console.log(`First Theta CE Sum after Baseline Time: ${theta_ce_sum} for ${name}`);
-            console.log(`First Theta PE Sum after Baseline Time: ${theta_pe_sum} for ${name}`);
-            console.log(`First Gamma CE Sum after Baseline Time: ${gamma_ce_sum} for ${name}`);
-            console.log(`First Gamma PE Sum after Baseline Time: ${gamma_pe_sum} for ${name}`);
+        const position = findAtmPosition(strikeList, atmvalue);
 
+        const vega_ce_sum = sumFromStartPosition(vegaCE, position - 1);
+        const vega_pe_sum = sumToPosition(vegaPE, position);
+        const theta_ce_sum = sumFromStartPosition(thetaCE, position - 1);
+        const theta_pe_sum = sumToPosition(thetaPE, position);
+        const gamma_ce_sum = sumFromStartPosition(gammaCE, position - 1);
+        const gamma_pe_sum = sumToPosition(gammaPE, position);
+
+        const ltp_ce_sum = calculateAverage(position - 1, 5, ltpCE, 'downwards');
+        const ltp_pe_sum = calculateAverage(position + 1, 5, ltpPE, 'upwards');
+
+        const timestamp = new Date().toLocaleTimeString();
+        const date_inserted = getTodayDate();
+        
+        const bull_spread = BullSpread(ltpCE, position);
+        const bear_spread = BearSpread(ltpPE, position);
+        const straddleValues = Straddle(ltpCE, ltpPE, position);
+        
+        // Calculate EMA for bull_spread and bear_spread
+        const db = new sqlite3.Database(`${name}.db`);
+        let bull_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bull_spread', bull_spread);
+        let bear_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bear_spread', bear_spread);
+
+        if (!firstPrintDone[name] && now >= baselineStartTime) {
             // Set baseline values
             baseline[name] = {
                 baseline_vega_ce: vega_ce_sum,
@@ -369,6 +376,8 @@ const fetchOptionsData = async (name, expiry) => {
             put_premium: ltp_pe_sum,
             bear_spread,
             bull_spread,
+            bear_spread_ema,
+            bull_spread_ema,
             atm_straddle: straddleValues.atm_straddle,
             atm_plus_1_straddle: straddleValues.atm_plus_1_straddle,
             atm_plus_2_straddle: straddleValues.atm_plus_2_straddle,
@@ -378,7 +387,6 @@ const fetchOptionsData = async (name, expiry) => {
             expiry
         };
 
-        const db = new sqlite3.Database(`${name}.db`);
         db.serialize(() => {
             db.run(`
                 CREATE TABLE IF NOT EXISTS ${name} (
@@ -414,7 +422,9 @@ const fetchOptionsData = async (name, expiry) => {
                     call_premium REAL,
                     put_premium REAL,
                     bear_spread REAL,
+                    bear_spread_ema REAL,
                     bull_spread REAL,
+                    bull_spread_ema REAL,
                     atm_straddle REAL,
                     atm_plus_1_straddle REAL,
                     atm_plus_2_straddle REAL,
@@ -430,7 +440,7 @@ const fetchOptionsData = async (name, expiry) => {
         console.log(`Data inserted successfully into ${name}.db`);
 
     } catch (error) {
-        console.error(`Error fetching options data for ${name}:`, error);
+        //console.error(`Error fetching options data for ${name}:`, error);
     }
 };
 
@@ -443,37 +453,75 @@ const isPastCutoffTime = () => {
 
 const startFetchingData = (name, expiry) => {
     const now = new Date();
+
+    // Use the values from the .env file
+    const [startHour, startMinute] = process.env.TRADING_START_TIME.split(':').map(Number);
+    const [endHour, endMinute] = process.env.TRADING_END_TIME.split(':').map(Number);
+
     const startTime = new Date();
-    startTime.setHours(9, 15, 0, 0); // 9:15 AM
+    startTime.setHours(startHour, startMinute, 0, 0); // Set the start time
+
+    const endTime = new Date();
+    endTime.setHours(endHour, endMinute, 0, 0); // Set the end time
 
     const timeUntilStart = startTime - now;
     const intervalDuration = 30000; // 30 seconds
 
     if (timeUntilStart > 0) {
-        console.log(`Waiting until 9:15 AM to start fetching data for ${name}`);
+        console.log(`Waiting until ${process.env.TRADING_START_TIME} to start fetching data for ${name}`);
         setTimeout(() => {
             const intervalId = setInterval(() => {
-                if (isPastCutoffTime()) {
+                if (isPastCutoffTime(endTime)) {
                     clearInterval(intervalId);
                     console.log(`Stopped fetching data for ${name}`);
                 } else {
                     fetchOptionsData(name, expiry);
                 }
             }, intervalDuration);
-            fetchOptionsData(name, expiry); // Fetch immediately at 9:15 AM
+            fetchOptionsData(name, expiry); // Fetch immediately at the start time
         }, timeUntilStart);
     } else {
         const intervalId = setInterval(() => {
-            if (isPastCutoffTime()) {
+            if (isPastCutoffTime(endTime)) {
                 clearInterval(intervalId);
                 console.log(`Stopped fetching data for ${name}`);
             } else {
                 fetchOptionsData(name, expiry);
             }
         }, intervalDuration);
-        fetchOptionsData(name, expiry); // Fetch immediately if past 9:15 AM
+        fetchOptionsData(name, expiry); // Fetch immediately if the current time is past the start time
     }
 };
+
+// Function to calculate EMA for a given column
+async function calculateEMA(db, tableName, columnName, latestValue) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT ${columnName} FROM ${tableName} ORDER BY timestamp DESC LIMIT 4`, [], (err, rows) => {
+            if (err) {
+                return reject(err);
+            }
+
+            const alpha = 2 / (5 + 1); // EMA period of 5
+
+            if (rows.length === 0) {
+                // No previous data, return the latest value as the EMA
+                return resolve(latestValue);
+            }
+
+            // Calculate EMA
+            let previousEMA = rows.reduce((acc, row, index) => {
+                if (index === 0) {
+                    return row[columnName]; // The first value in the series
+                }
+                return alpha * row[columnName] + (1 - alpha) * acc;
+            }, latestValue);
+
+            let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
+
+            resolve(currentEMA);
+        });
+    });
+}
 
 // Function to calculate percentage change
 function calculatePercentageChange(currentValue, previousValue) {
@@ -485,18 +533,50 @@ function calculatePercentageChange(currentValue, previousValue) {
     }
 }
 
+// Function to send notifications via Telegram and to the frontend
+function sendNotification(signal) {
+    // Sending notification to Telegram
+    const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const telegramChatId = process.env.TELEGRAM_CHAT_ID;
 
+    if (telegramBotToken && telegramChatId) {
+        const telegramUrl = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
+        const message = `Trading Signal Alert: ${signal}`;
+        axios.post(telegramUrl, {
+            chat_id: telegramChatId,
+            text: message
+        }).then(() => {
+            console.log('Telegram notification sent.');
+        }).catch((err) => {
+            console.error('Error sending Telegram notification:', err.message);
+        });
+    }
 
+    // Sending notification to the frontend
+    io.emit('signal-update', { signal });
+}
 
+// Variable to store the previous signal
+let previousSignal = '';
 
+function evaluateAndNotify(a, b, c, d, bull_spread_ema, bear_spread_ema) {
+    const signal = calculateSignal(a, b, c, d, bull_spread_ema, bear_spread_ema);
+
+    // Check if the signal has changed
+    if (signal !== previousSignal) {
+        // Send notifications when the signal changes
+        sendNotification(signal);
+        previousSignal = signal;
+    }
+
+    return signal;
+}
 
 // Start fetching data for each index with the respective expiry
 startFetchingData('NIFTY', process.env.nifty);
 startFetchingData('BANKNIFTY', process.env.bankNifty);
 startFetchingData('FINNIFTY', process.env.finnifty);
 startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
-
-
 
 // Update .env file with new settings
 app.post('/update-settings', (req, res) => {
@@ -535,7 +615,7 @@ app.post('/stop-server', (req, res) => {
 
 app.post('/start-server', (req, res) => {
     console.log('Starting server...');
-    
+
     // Execute the command to start the server
     exec('npm run restart', (error, stdout, stderr) => {
         if (error) {
@@ -551,9 +631,7 @@ app.post('/start-server', (req, res) => {
     });
 });
 
-
-//Get settings from the .env file
-// Add this route to send settings to the client
+// Get settings from the .env file
 app.get('/api/get-settings', (req, res) => {
     const settings = {
         accessToken: process.env.accessToken || '',
@@ -569,9 +647,9 @@ app.get('/api/get-settings', (req, res) => {
 
 app.post('/options', (req, res) => {
     const {
-        name,
-        expiry
-    } = req.body;
+         name, 
+         expiry 
+        } = req.body;
     if (!name || !expiry) {
         return res.status(400).send('Name and expiry are required.');
     }
@@ -669,27 +747,27 @@ app.get('/api/straddle-data', (req, res) => {
         const previousRow = rows.find(row => row.timestamp <= fiveMinutesAgoTimestamp);
 
         const result = [{
-                strike: 'ATM-2',
+                strike: 'S-2',
                 value: currentRow.atm_minus_2_straddle,
                 changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow ? previousRow.atm_minus_2_straddle : null)
             },
             {
-                strike: 'ATM-1',
+                strike: 'S-1',
                 value: currentRow.atm_minus_1_straddle,
                 changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow ? previousRow.atm_minus_1_straddle : null)
             },
             {
-                strike: 'ATM',
+                strike: 'S0',
                 value: currentRow.atm_straddle,
                 changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow ? previousRow.atm_straddle : null)
             },
             {
-                strike: 'ATM+1',
+                strike: 'S+1',
                 value: currentRow.atm_plus_1_straddle,
                 changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow ? previousRow.atm_plus_1_straddle : null)
             },
             {
-                strike: 'ATM+2',
+                strike: 'S+2',
                 value: currentRow.atm_plus_2_straddle,
                 changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow ? previousRow.atm_plus_2_straddle : null)
             }
@@ -742,10 +820,7 @@ app.get('/api/initial-values', (req, res) => {
 
 // Route to fetch last live values
 app.get('/api/live-values', (req, res) => {
-    const {
-        index,
-        date
-    } = req.query;
+    const { index, date } = req.query;
     if (!index || !date) {
         return res.status(400).send('Invalid or missing parameters.');
     }
@@ -763,11 +838,10 @@ app.get('/api/live-values', (req, res) => {
 
         const e = row.bull_spread;
         const f = row.bear_spread;
+        const bull_spread_ema = row.bull_spread_ema;
+        const bear_spread_ema = row.bear_spread_ema;
 
-        res.json({
-            e,
-            f
-        });
+        res.json({ e, f, bull_spread_ema, bear_spread_ema });
     });
 
     db.close();
@@ -846,6 +920,10 @@ app.post('/restart', (req, res) => {
     }, 1000); // 1-second delay
 });
 
-app.listen(port, () => {
+server.listen(port, () => {
     console.log(`Server running on port ${port}`);
+});
+
+io.on('connection', (socket) => {
+    console.log('a user connected');
 });

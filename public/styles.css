@@ -142,7 +142,36 @@ body {
     background-color: #0056b3;
 }
 
-/* Settings Modal Styles */
+/* Adjusted Settings Modal */
+#settings-modal {
+    display: none; /* Start hidden */
+    position: fixed;
+    z-index: 1000;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 400px;
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    overflow: hidden; /* Ensure contents don't overflow */
+}
+
+
+/* Modal Overlay */
+#modal-overlay {
+    display: none; /* Start hidden */
+    position: fixed;
+    z-index: 999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+}
+
+/* Settings Modal */
 #settings-modal {
     display: none; /* Start hidden */
     position: fixed;
@@ -156,6 +185,7 @@ body {
     padding: 20px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
+
 
 /* Restart Notification Modal Styles */
 #restart-notification {

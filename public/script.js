@@ -243,16 +243,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!ltpChart) {
                 ltpChart = createChart("#ltpChart", [{
-                        name: 'LTP CE Sum',
+                        name: 'LTP CE',
                         data: filteredLtpCE,
                         color: '#88D66C'
                     },
                     {
-                        name: 'LTP PE Sum',
+                        name: 'LTP PE',
                         data: filteredLtpPE,
                         color: '#F5004F'
                     }
-                ], 'LTP Sums');
+                ], 'LTP View');
                 if (ltpChart) ltpChart.render();
             } else {
                 updateChart(ltpChart, [{
