@@ -11,7 +11,7 @@
 </head>
 
 <body>
- <div class="header">
+    <div class="header">
         <span id="current-date-time"></span>
         <select id="index-select">
             <option value="NIFTY">NIFTY</option>
@@ -21,13 +21,14 @@
         </select>
         <span id="expiry-date"></span>
         <div class="date-export-group">
-            <label for="date-select">Select Date for Export:</label>
+            <label for="date-select">Select Date:</label>
             <input type="date" id="date-select">
             <button class="icon-button" id="export-button">
                 <span class="material-icons">file_download</span>
             </button>
         </div>
         <a href="referential.html" class="referential-link">Referential</a>
+        <a href="option.html" class="option-link">Option</a>
         <button class="icon-button" id="settings-button">
             <span class="material-icons">settings</span>
         </button>
@@ -78,63 +79,15 @@
                         </div>
                     </div>
                 </div>
-                <button type="submit" class="btn">Save</button>
+                <button type="submit" class="btn">Save & Restart Application</button>
             </form>
+            <div id="restart-notification" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <p>Server is restarting... Please wait.</p>
+                </div>
+            </div>
         </div>
     </div>
-
-    <script>
-        // Get modal element
-        var modal = document.getElementById("settings-modal");
-
-        // Get open modal button
-        var btn = document.getElementById("settings-button");
-
-        // Get close button
-        var span = document.getElementsByClassName("close")[0];
-
-        // Open the modal
-        btn.onclick = function () {
-            modal.style.display = "block";
-        }
-
-        // Close the modal
-        span.onclick = function () {
-            modal.style.display = "none";
-        }
-
-        // Close the modal if user clicks outside of it
-        window.onclick = function (event) {
-            if (event.target == modal) {
-                modal.style.display = "none";
-            }
-        }
-
-        // Handle settings form submission
-        document.getElementById('settings-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const settings = {};
-            formData.forEach((value, key) => {
-                settings[key] = value;
-            });
-
-            const response = await fetch('/update-settings', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(settings)
-            });
-
-            if (response.ok) {
-                alert('Settings updated successfully');
-                modal.style.display = "none";
-            } else {
-                alert('Failed to update settings');
-            }
-        });
-    </script>
 
     <script src="script.js"></script>
 </body>

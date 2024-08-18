@@ -1,0 +1,82 @@
+body {
+    font-family: Arial, sans-serif;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #f4f4f4;
+    border-bottom: 1px solid #ccc;
+}
+
+.tables-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-around;
+    padding: 20px;
+}
+
+.table-container {
+    width: 45%;
+    margin: 10px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 12px;
+    border: 1px solid #ddd;
+    text-align: center;
+}
+
+th {
+    background-color: #f2f2f2;
+}
+
+.range-header {
+    background-color: #d9eaf2;
+}
+
+.bcs-header, .bps-header, .signal-header {
+    background-color: #d3d3d3;
+}
+
+tbody tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.value-container {
+    display: flex;
+    align-items: center;
+}
+
+.value-container .change-positive {
+    color: green;
+    margin-left: 8px;
+    font-weight: bold;
+}
+
+.value-container .change-negative {
+    color: red;
+    margin-left: 8px;
+    font-weight: bold;
+}
+
+.value-container .icon-up {
+    color: green;
+    margin-left: 4px;
+}
+
+.value-container .icon-down {
+    color: red;
+    margin-left: 4px;
+}
+
+#signal {
+    font-weight: bold;
+}

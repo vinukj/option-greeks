@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="option.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <title>Option Greeks Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+
+<body>
+<div class="header">
+        <span id="current-date-time"></span>
+        <select id="index-select">
+            <option value="NIFTY">NIFTY</option>
+            <option value="BANKNIFTY">BANKNIFTY</option>
+            <option value="FINNIFTY">FINNIFTY</option>
+            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+        </select>
+        <span id="expiry-date"></span>
+        <div class="date-export-group">
+            <label for="date-select">Select Date for Export:</label>
+            <input type="date" id="date-select">
+            <button class="icon-button" id="export-button">
+                <span class="material-icons">file_download</span>
+            </button>
+        </div>
+        <a href="referential.html" class="referential-link">Referential</a>
+        <a href="index.html" class="home-link">Home</a>
+        <button class="icon-button" id="settings-button">
+            <span class="material-icons">settings</span>
+        </button>
+    </div>
+
+    <div class="tables-container">
+        <div class="table-container">
+            <table id="straddle-table">
+                <thead>
+                    <tr>
+                        <th>Strike</th>
+                        <th>Values (% change in last 5 min)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be populated here dynamically -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="table-container">
+            <table id="range-table">
+                <thead>
+                    <tr>
+                        <th colspan="4" class="range-header">RANGES</th>
+                        <th class="bcs-header">CS</th>
+                        <th class="bps-header">PS</th>
+                        <th class="signal-header">Signal</th>
+                    </tr>
+                   <!-- <tr>
+                        <th>a</th>
+                        <th>b</th>
+                        <th>c</th>
+                        <th>d</th>
+                        <th>e</th>
+                        <th>f</th>
+                        <th>Signal</th> 
+                    </tr> -->
+                </thead>
+                <tbody>
+                    <tr>
+                        <td id="value-a">0.00</td>
+                        <td id="value-b">0.00</td>
+                        <td id="value-c">0.00</td>
+                        <td id="value-d">0.00</td>
+                        <td id="value-e">0.00</td>
+                        <td id="value-f">0.00</td>
+                        <td id="signal">No Trend/Momentum</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Update Settings</h2>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label for="accessToken">Access Token:</label>
+                    <input type="text" id="accessToken" name="accessToken">
+                </div>
+                <div class="form-group">
+                    <label for="wsToken">WS Token:</label>
+                    <input type="text" id="wsToken" name="wsToken">
+                </div>
+                <div class="form-group">
+                    <label for="daysToExpire">Days to Expire:</label>
+                    <input type="text" id="daysToExpire" name="daysToExpire">
+                </div>
+                <div class="form-group">
+                    <label>Index Expiry Dates:</label>
+                    <div class="expiry-group">
+                        <div class="expiry-item">
+                            <label for="nifty">NIFTY:</label>
+                            <input type="date" id="nifty" name="nifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="bankNifty">BANKNIFTY:</label>
+                            <input type="date" id="bankNifty" name="bankNifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="finnifty">FINNIFTY:</label>
+                            <input type="date" id="finnifty" name="finnifty">
+                        </div>
+                        <div class="expiry-item">
+                            <label for="midcpNifty">MIDCPNIFTY:</label>
+                            <input type="date" id="midcpNifty" name="midcpNifty">
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="btn">Save & Restart Application</button>
+            </form>
+            <div id="restart-notification" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <p>Server is restarting... Please wait.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Get modal element
+        var modal = document.getElementById("settings-modal");
+
+        // Get open modal button
+        var btn = document.getElementById("settings-button");
+
+        // Get close button
+        var span = document.getElementsByClassName("close")[0];
+
+        // Open the modal
+        btn.onclick = function () {
+            modal.style.display = "block";
+        }
+
+        // Close the modal
+        span.onclick = function () {
+            modal.style.display = "none";
+        }
+
+        // Close the modal if user clicks outside of it
+        window.onclick = function (event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+
+        // Handle settings form submission
+        document.getElementById('settings-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const settings = {};
+            formData.forEach((value, key) => {
+                settings[key] = value;
+            });
+
+            const response = await fetch('/update-settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            });
+
+            if (response.ok) {
+                alert('Settings updated successfully');
+                modal.style.display = "none";
+            } else {
+                alert('Failed to update settings');
+            }
+        });
+    </script>
+
+    <script src="option.js"></script>
+     <script src="script.js"></script>
+
+</body>
+
+</html>

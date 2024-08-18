@@ -1,7 +1,10 @@
 const express = require('express');
 const axios = require('axios');
 const dotenv = require('dotenv');
-const path = require('path'); // Add this line
+const {
+    exec
+} = require('child_process');
+const path = require('path');
 const app = express();
 const sqlite3 = require('sqlite3').verbose();
 const ExcelJS = require('exceljs');
@@ -15,8 +18,6 @@ const DAYS_TO_EXPIRE = parseFloat(process.env.daysToExpire);
 
 const port = 3005;
 app.use(express.json());
-//app.use(express.static('public'));
-// Serve static files from the 'public' directory
 app.use(express.static(__dirname + '/public'));
 
 let firstPrintDone = {
@@ -27,17 +28,20 @@ let firstPrintDone = {
 };
 
 if (!isNaN(DAYS_TO_EXPIRE)) {
-    // Use daysToExpire as a number
     console.log(`Days to expire: ${DAYS_TO_EXPIRE}`);
-  } else {
-    // Handle the error case
+} else {
     console.error('Invalid number for daysToExpire');
-  }
-
+}
 
 const getTodayDate = () => {
     const today = new Date();
     return today.toISOString().split('T')[0];
+};
+
+const getFiveMinutesAgoTimestamp = () => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - 5);
+    return now.toISOString().split('T')[1];
 };
 
 let baseline = {
@@ -75,7 +79,6 @@ let baseline = {
     }
 };
 
-// Parse the baseline start time from the environment variable
 const parseBaselineStartTime = (timeString) => {
     const [hours, minutes] = timeString.split(':').map(Number);
     const baselineTime = new Date();
@@ -85,7 +88,6 @@ const parseBaselineStartTime = (timeString) => {
 
 const baselineStartTime = parseBaselineStartTime(process.env.BASELINE_START_TIME);
 
-// Insert Data into respective DB
 const insertData = (db, tableName, dataToInsert) => {
     const {
         timestamp,
@@ -112,7 +114,6 @@ const insertData = (db, tableName, dataToInsert) => {
         expiry,
         date_inserted
     } = dataToInsert;
-    console.log(`Inserting data into ${tableName}:`, dataToInsert); // Debug log
 
     db.run(`INSERT INTO ${tableName} (
         timestamp, vega_ce_sum, vega_pe_sum, theta_ce_sum, theta_pe_sum, gamma_ce_sum,
@@ -129,14 +130,55 @@ const insertData = (db, tableName, dataToInsert) => {
     ]);
 };
 
-// Function to fetch options data from the endpoint
+const insertOptionData = (db, tableName, optiondataToInsert) => {
+    const {
+        timestamp,
+        call_premium,
+        put_premium,
+        bear_spread,
+        bull_spread,
+        atm_straddle,
+        atm_plus_1_straddle,
+        atm_plus_2_straddle,
+        atm_minus_1_straddle,
+        atm_minus_2_straddle,
+        date_inserted,
+        expiry
+    } = optiondataToInsert;
+
+    db.run(`INSERT INTO ${tableName} (
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,
+        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,
+        atm_minus_1_straddle, atm_minus_2_straddle, date_inserted, expiry
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,
+        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,
+        atm_minus_1_straddle, atm_minus_2_straddle, date_inserted, expiry
+    ]);
+};
+
 const fetchOptionsData = async (name, expiry) => {
     try {
+        // const startTimeString = process.env.TRADING_START_TIME ;
+        // const endTimeString = process.env.TRADING_END_TIME ;
+
+        // const [startHour, startMinute] = startTimeString.split(':').map(Number);
+        // const [endHour, endMinute] = endTimeString.split(':').map(Number);
+
+        // const now = new Date();
+
+        // const startTime = new Date();
+        // startTime.setHours(startHour, startMinute, 0, 0);
+
+        // const endTime = new Date();
+        // endTime.setHours(endHour, endMinute, 0, 0);
+
         const now = new Date();
         const startTime = new Date();
-        startTime.setHours(9, 15, 0, 0);
+        startTime.setHours(8, 10, 0, 0);
         const endTime = new Date();
-        endTime.setHours(15, 35, 0, 0);
+        endTime.setHours(23, 59, 0, 0);
+
 
         if (now < startTime || now > endTime) {
             console.log(`Current time ${now} is outside trading hours for ${name}`);
@@ -152,7 +194,6 @@ const fetchOptionsData = async (name, expiry) => {
             "days_to_expire": DAYS_TO_EXPIRE,
             "user_id": process.env.USERID,
             "ws_token": process.env.wsToken
-
         }, {
             headers: {
                 'Content-Type': 'application/json',
@@ -171,15 +212,28 @@ const fetchOptionsData = async (name, expiry) => {
         const ltpCE = response.data.ltp_ce_list;
         const ltpPE = response.data.ltp_pe_list;
 
+        const position = findAtmPosition(strikeList, atmvalue);
+
+        const vega_ce_sum = sumFromStartPosition(vegaCE, position - 1);
+        const vega_pe_sum = sumToPosition(vegaPE, position);
+        const theta_ce_sum = sumFromStartPosition(thetaCE, position - 1);
+        const theta_pe_sum = sumToPosition(thetaPE, position);
+        const gamma_ce_sum = sumFromStartPosition(gammaCE, position - 1);
+        const gamma_pe_sum = sumToPosition(gammaPE, position);
+
+        const ltp_ce_sum = calculateAverage(position - 1, 5, ltpCE, 'downwards');
+        const ltp_pe_sum = calculateAverage(position + 1, 5, ltpPE, 'upwards');
+
+        const timestamp = new Date().toLocaleTimeString();
+        const date_inserted = getTodayDate();
+
+        const bull_spread = BullSpread(ltpCE, position);
+        const bear_spread = BearSpread(ltpPE, position);
+        const straddleValues = Straddle(ltpCE, ltpPE, position);
+
         function findAtmPosition(strikeList, atmvalue) {
             const index = strikeList.findIndex(strike => strike === atmvalue);
             return index !== -1 ? index : 'ATM value not found in strike list';
-        }
-
-        const position = findAtmPosition(strikeList, atmvalue);
-
-        function sumAll(numbers) {
-            return numbers.reduce((acc, curr) => acc + curr, 0);
         }
 
         function sumFromStartPosition(array, startPosition) {
@@ -196,17 +250,63 @@ const fetchOptionsData = async (name, expiry) => {
             return array.slice(0, position + 1).reduce((acc, curr) => acc + curr, 0);
         }
 
-        const vega_ce_sum = sumFromStartPosition(vegaCE, position - 1);
-        const vega_pe_sum = sumToPosition(vegaPE, position);
-        const theta_ce_sum = sumFromStartPosition(thetaCE, position - 1);
-        const theta_pe_sum = sumToPosition(thetaPE, position);
-        const gamma_ce_sum = sumFromStartPosition(gammaCE, position - 1);
-        const gamma_pe_sum = sumToPosition(gammaPE, position);
-        const ltp_ce_sum = sumAll(ltpCE);
-        const ltp_pe_sum = sumAll(ltpPE);
+        function calculateAverage(position, count, array, direction) {
+            if (position < 0 || position >= array.length || count <= 0) {
+                throw new Error('Invalid position or count');
+            }
 
-        const timestamp = new Date().toLocaleTimeString();
-        const date_inserted = getTodayDate(); // Add this line to set the date_inserted
+            let sum = 0;
+            let elements = [];
+
+            if (direction === 'downwards') {
+                for (let i = position; i < position + count && i < array.length; i++) {
+                    elements.push(array[i]);
+                    sum += array[i];
+                }
+            } else if (direction === 'upwards') {
+                for (let i = position; i > position - count && i >= 0; i--) {
+                    elements.push(array[i]);
+                    sum += array[i];
+                }
+            } else {
+                throw new Error('Invalid direction specified. Use "downwards" or "upwards".');
+            }
+
+            return Math.round(sum / elements.length);
+        }
+
+        // Function to calculate Bull Spread
+        function BullSpread(ltpCE, position) {
+            if (position + 4 < ltpCE.length) {
+                return Math.round(ltpCE[position] - ltpCE[position + 4]);
+            } else {
+                throw new Error('Position + 5 exceeds the length of ltpCE array');
+            }
+        }
+
+        // Function to calculate Bear Spread    
+        function BearSpread(ltpPE, position) {
+            if (position - 5 >= 0) {
+                return Math.round(ltpPE[position - 1] - ltpPE[position - 5]);
+            } else {
+                throw new Error('Position - 5 is less than 0 in ltpPE array');
+            }
+        }
+
+        // Function to calculate Straddle values
+        function Straddle(ltpCE, ltpPE, position) {
+            if (position - 2 >= 0 && position + 2 < ltpCE.length && position + 2 < ltpPE.length) {
+                return {
+                    atm_straddle: Math.round(ltpCE[position] + ltpPE[position]),
+                    atm_plus_1_straddle: Math.round(ltpCE[position + 1] + ltpPE[position + 1]),
+                    atm_plus_2_straddle: Math.round(ltpCE[position + 2] + ltpPE[position + 2]),
+                    atm_minus_1_straddle: Math.round(ltpCE[position - 1] + ltpPE[position - 1]),
+                    atm_minus_2_straddle: Math.round(ltpCE[position - 2] + ltpPE[position - 2]),
+                };
+            } else {
+                throw new Error('Position out of bounds for calculating straddles');
+            }
+        }
 
         if (!firstPrintDone[name] && now >= baselineStartTime) {
             console.log(`First Vega CE Sum after Baseline Time: ${vega_ce_sum} for ${name}`);
@@ -235,6 +335,7 @@ const fetchOptionsData = async (name, expiry) => {
         const diff_gamma_ce = baseline[name].baseline_gamma_ce !== 0 ? gamma_ce_sum - baseline[name].baseline_gamma_ce : 0;
         const diff_gamma_pe = baseline[name].baseline_gamma_pe !== 0 ? gamma_pe_sum - baseline[name].baseline_gamma_pe : 0;
 
+        // Data to insert to main table
         const dataToInsert = {
             timestamp,
             vega_ce_sum,
@@ -259,6 +360,22 @@ const fetchOptionsData = async (name, expiry) => {
             diff_gamma_pe,
             expiry,
             date_inserted
+        };
+
+        // Data to insert into the optionhedge table
+        const optiondataToInsert = {
+            timestamp,
+            call_premium: ltp_ce_sum,
+            put_premium: ltp_pe_sum,
+            bear_spread,
+            bull_spread,
+            atm_straddle: straddleValues.atm_straddle,
+            atm_plus_1_straddle: straddleValues.atm_plus_1_straddle,
+            atm_plus_2_straddle: straddleValues.atm_plus_2_straddle,
+            atm_minus_1_straddle: straddleValues.atm_minus_1_straddle,
+            atm_minus_2_straddle: straddleValues.atm_minus_2_straddle,
+            date_inserted,
+            expiry
         };
 
         const db = new sqlite3.Database(`${name}.db`);
@@ -291,6 +408,23 @@ const fetchOptionsData = async (name, expiry) => {
                 )
             `);
             insertData(db, name, dataToInsert);
+            db.run(`
+                CREATE TABLE IF NOT EXISTS OPTIONHEDGE (
+                    timestamp TEXT,
+                    call_premium REAL,
+                    put_premium REAL,
+                    bear_spread REAL,
+                    bull_spread REAL,
+                    atm_straddle REAL,
+                    atm_plus_1_straddle REAL,
+                    atm_plus_2_straddle REAL,
+                    atm_minus_1_straddle REAL,
+                    atm_minus_2_straddle REAL,
+                    date_inserted TEXT,
+                    expiry TEXT
+                )
+            `);
+            insertOptionData(db, 'OPTIONHEDGE', optiondataToInsert);
         });
         db.close();
         console.log(`Data inserted successfully into ${name}.db`);
@@ -341,6 +475,29 @@ const startFetchingData = (name, expiry) => {
     }
 };
 
+// Function to calculate percentage change
+function calculatePercentageChange(currentValue, previousValue) {
+    if (previousValue !== null && previousValue !== undefined && currentValue !== null && currentValue !== undefined) {
+        const change = ((currentValue - previousValue) / previousValue) * 100;
+        return `${change.toFixed(2)}%`;
+    } else {
+        return '0.00%'; // No previous data available, assume no change
+    }
+}
+
+
+
+
+
+
+// Start fetching data for each index with the respective expiry
+startFetchingData('NIFTY', process.env.nifty);
+startFetchingData('BANKNIFTY', process.env.bankNifty);
+startFetchingData('FINNIFTY', process.env.finnifty);
+startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
+
+
+
 // Update .env file with new settings
 app.post('/update-settings', (req, res) => {
     const newSettings = req.body;
@@ -363,17 +520,52 @@ app.post('/update-settings', (req, res) => {
 
     fs.writeFileSync(envPath, envContent);
 
-    // Reload environment variables
-    dotenv.config();
-
     res.send('Settings updated successfully');
 });
 
-// Start fetching data for each index with the respective expiry
-startFetchingData('NIFTY', process.env.nifty);
-startFetchingData('BANKNIFTY', process.env.bankNifty);
-startFetchingData('FINNIFTY', process.env.finnifty);
-startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
+app.post('/stop-server', (req, res) => {
+    res.send('Stopping server...');
+    console.log('Server is stopping...');
+
+    // Delay the stop slightly to ensure the response is sent first
+    setTimeout(() => {
+        process.exit(0); // Stops the server
+    }, 1000); // 1-second delay
+});
+
+app.post('/start-server', (req, res) => {
+    console.log('Starting server...');
+    
+    // Execute the command to start the server
+    exec('npm run restart', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`Error starting server: ${error.message}`);
+            return res.status(500).send('Failed to start the server');
+        }
+        if (stderr) {
+            console.error(`stderr: ${stderr}`);
+            return res.status(500).send('Failed to start the server');
+        }
+        console.log(`stdout: ${stdout}`);
+        res.send('Server started successfully');
+    });
+});
+
+
+//Get settings from the .env file
+// Add this route to send settings to the client
+app.get('/api/get-settings', (req, res) => {
+    const settings = {
+        accessToken: process.env.accessToken || '',
+        wsToken: process.env.wsToken || '',
+        daysToExpire: process.env.daysToExpire || '',
+        nifty: process.env.nifty || '',
+        bankNifty: process.env.bankNifty || '',
+        finnifty: process.env.finnifty || '',
+        midcpNifty: process.env.midcpNifty || '',
+    };
+    res.json(settings);
+});
 
 app.post('/options', (req, res) => {
     const {
@@ -389,15 +581,17 @@ app.post('/options', (req, res) => {
 
 app.get('/api/data', (req, res) => {
     const {
-        name
+        name,
+        date
     } = req.query;
     if (!name) {
         return res.status(400).send('Invalid or missing name parameter.');
     }
-    const db = new sqlite3.Database(`${name}.db`);
-    const today = getTodayDate();
 
-    db.all(`SELECT * FROM ${name} WHERE date_inserted = ?`, [today], (err, rows) => {
+    const db = new sqlite3.Database(`${name}.db`);
+    const selectedDate = date || getTodayDate();
+
+    db.all(`SELECT * FROM ${name} WHERE date_inserted = ?`, [selectedDate], (err, rows) => {
         if (err) {
             console.error(err.message);
             res.status(500).send('An error occurred while fetching data.');
@@ -405,7 +599,9 @@ app.get('/api/data', (req, res) => {
         }
 
         if (rows.length === 0) {
-            console.log(`No data found for ${name} on ${today}`);
+            console.log(`No data found for ${name} on ${selectedDate}`);
+            res.status(404).send('No data found for the selected date.');
+            return;
         }
 
         const data = {
@@ -443,6 +639,138 @@ app.get('/api/expiry-dates', (req, res) => {
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
+});
+
+// API route to fetch straddle data with percentage changes
+app.get('/api/straddle-data', (req, res) => {
+    const {
+        index,
+        date
+    } = req.query;
+    if (!index || !date) {
+        return res.status(400).send('Invalid or missing parameters.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+
+    db.all(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY timestamp DESC`, [date], (err, rows) => {
+        if (err) {
+            console.error(err.message);
+            return res.status(500).send('An error occurred while fetching data.');
+        }
+
+        if (!rows || rows.length === 0) {
+            return res.status(404).send('No data available for the selected date.');
+        }
+
+        const fiveMinutesAgoTimestamp = getFiveMinutesAgoTimestamp();
+
+        const currentRow = rows[0];
+        const previousRow = rows.find(row => row.timestamp <= fiveMinutesAgoTimestamp);
+
+        const result = [{
+                strike: 'ATM-2',
+                value: currentRow.atm_minus_2_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow ? previousRow.atm_minus_2_straddle : null)
+            },
+            {
+                strike: 'ATM-1',
+                value: currentRow.atm_minus_1_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow ? previousRow.atm_minus_1_straddle : null)
+            },
+            {
+                strike: 'ATM',
+                value: currentRow.atm_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow ? previousRow.atm_straddle : null)
+            },
+            {
+                strike: 'ATM+1',
+                value: currentRow.atm_plus_1_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow ? previousRow.atm_plus_1_straddle : null)
+            },
+            {
+                strike: 'ATM+2',
+                value: currentRow.atm_plus_2_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow ? previousRow.atm_plus_2_straddle : null)
+            }
+        ];
+
+        res.json(result);
+    });
+
+    db.close();
+});
+
+//API route to fetch initial vlaues for the straddle data
+app.get('/api/initial-values', (req, res) => {
+    const {
+        index,
+        date
+    } = req.query;
+    if (!index || !date) {
+        return res.status(400).send('Invalid or missing parameters.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+
+    db.get(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? AND timestamp = '09:20:00' LIMIT 1`, [date], (err, row) => {
+        if (err) {
+            console.error(err.message);
+            return res.status(500).send('An error occurred while fetching initial values.');
+        }
+
+        if (!row) {
+            return res.status(404).send('No data found for 09:20 AM.');
+        }
+
+        const a = row.bull_spread * 1.15;
+        const b = row.bull_spread * 0.85;
+        const c = row.bear_spread * 1.15;
+        const d = row.bear_spread * 0.85;
+
+        res.json({
+            a,
+            b,
+            c,
+            d
+        });
+    });
+
+    db.close();
+});
+
+
+// Route to fetch last live values
+app.get('/api/live-values', (req, res) => {
+    const {
+        index,
+        date
+    } = req.query;
+    if (!index || !date) {
+        return res.status(400).send('Invalid or missing parameters.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+    db.get(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY timestamp DESC LIMIT 1`, [date], (err, row) => {
+        if (err) {
+            console.error(err.message);
+            return res.status(500).send('An error occurred while fetching live values.');
+        }
+
+        if (!row) {
+            return res.status(404).send('No live data found for the selected date.');
+        }
+
+        const e = row.bull_spread;
+        const f = row.bear_spread;
+
+        res.json({
+            e,
+            f
+        });
+    });
+
+    db.close();
 });
 
 // Export data to excel
@@ -495,6 +823,27 @@ app.get('/api/export-data', async (req, res) => {
     });
 
     db.close();
+});
+
+app.post('/restart', (req, res) => {
+    res.send('Server is restarting...');
+
+    console.log('Restarting server...');
+
+    // Delay the restart slightly to ensure the response is sent first
+    setTimeout(() => {
+        exec('npm run restart', (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error restarting server: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                console.error(`stderr: ${stderr}`);
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+        });
+    }, 1000); // 1-second delay
 });
 
 app.listen(port, () => {

@@ -141,3 +141,54 @@ body {
 .btn:hover {
     background-color: #0056b3;
 }
+
+/* Settings Modal Styles */
+#settings-modal {
+    display: none; /* Start hidden */
+    position: fixed;
+    z-index: 1000;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 400px;
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+/* Restart Notification Modal Styles */
+#restart-notification {
+    display: none; /* Start hidden */
+    position: fixed;
+    z-index: 1001; /* Ensure it's above other elements */
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px;
+    background-color: rgba(0, 0, 0, 0.8);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    color: #fff;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+/* Modal Content */
+#restart-notification .modal-content {
+    margin: 0;
+}
+
+#restart-notification .modal-content p {
+    position: fixed;
+    z-index: 1000;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px; /* Smaller notification box */
+    background-color: rgba(0, 0, 0, 0.8); /* Semi-transparent background */
+    border-radius: 8px; /* Rounded corners */
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
