@@ -43,6 +43,10 @@
                     </tr>
                 </thead>
                 <tbody>
+                <tr>
+                        <td>S-3</td>
+                        <td> </td>
+                    </tr>
                     <tr>
                         <td>S-2</td>
                         <td> </td>
@@ -63,6 +67,10 @@
                         <td>S+2</td>
                         <td> </td>
                     </tr>
+                    <tr>
+                        <td>S+2</td>
+                        <td> </td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -72,10 +80,10 @@
                 <thead>
                     <tr>
                         <th colspan="4" class="range-header">RANGES</th>
-                        <th class="bcs-header">CS</th>
-                        <th class="bps-header">PS</th>
-                        <th class="ebcs-header">ECS</th>
-                        <th class="ebps-header">EPS</th>
+                        <th class="bcs-header">ECS</th>
+                        <th class="bps-header">EPS</th>
+                        <th class="ebcs-header">CS</th>
+                        <th class="ebps-header">PS</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -84,16 +92,17 @@
                         <td id="value-b">0.00</td>
                         <td id="value-c">0.00</td>
                         <td id="value-d">0.00</td>
-                        <td id="value-e">0.00</td>
-                        <td id="value-f">0.00</td>
                         <td id="bull-spread-ema">0.00</td>
                         <td id="bear-spread-ema">0.00</td>
+                        <td id="value-e">0.00</td>
+                        <td id="value-f">0.00</td>
+
                     </tr>
                 </tbody>
             </table>
             <!-- Signal below the table -->
             <div id="signal-container">
-                <span id="signal">No Trend/Momentum</span>
+                <span id="signal"></span>
             </div>
         </div>
     </div>
@@ -101,9 +110,9 @@
     <div class="chart-container">
         <div id="ltpChart"></div>
     </div>
-
-    <script src="option.js"></script>
     <script src="script.js"></script>
+    <script src="option.js"></script>
+    
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();

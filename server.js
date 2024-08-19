@@ -196,10 +196,6 @@ const fetchOptionsData = async (name, expiry) => {
             ws_token: process.env.wsToken
         };
 
-
-        // Add console.log to see the request parameters being sent
-       // console.log('Request Parameters:', requestData);
-
         const response = await axios.post('https://beta.inuvest.tech/backtest/getComputedValue/', requestData, {
             headers: {
                 'Content-Type': 'application/json',
@@ -207,8 +203,6 @@ const fetchOptionsData = async (name, expiry) => {
             }
         });        
 
-
-        //console.log("Responseeee " ,response);
         const strikeList = response.data.strike_list;
         const atmvalue = response.data.atm_values.strike_price;
         const vegaCE = response.data.greeks.vega_ce;
@@ -220,11 +214,13 @@ const fetchOptionsData = async (name, expiry) => {
         const ltpCE = response.data.ltp_ce_list;
         const ltpPE = response.data.ltp_pe_list;
 
+        console.log("ATM Value ", atmvalue);
         // Ensure helper functions are defined before usage
         function findAtmPosition(strikeList, atmvalue) {
             const index = strikeList.findIndex(strike => strike === atmvalue);
             return index !== -1 ? index : 'ATM value not found in strike list';
         }
+
 
         function sumFromStartPosition(array, startPosition) {
             if (startPosition < 0 || startPosition >= array.length) {
@@ -285,13 +281,16 @@ const fetchOptionsData = async (name, expiry) => {
 
         // Function to calculate Straddle values
         function Straddle(ltpCE, ltpPE, position) {
-            if (position - 2 >= 0 && position + 2 < ltpCE.length && position + 2 < ltpPE.length) {
+            if (position - 3 >= 0 && position + 3 < ltpCE.length && position + 3 < ltpPE.length) {
                 return {
                     atm_straddle: Math.round(ltpCE[position] + ltpPE[position]),
                     atm_plus_1_straddle: Math.round(ltpCE[position + 1] + ltpPE[position + 1]),
                     atm_plus_2_straddle: Math.round(ltpCE[position + 2] + ltpPE[position + 2]),
                     atm_minus_1_straddle: Math.round(ltpCE[position - 1] + ltpPE[position - 1]),
                     atm_minus_2_straddle: Math.round(ltpCE[position - 2] + ltpPE[position - 2]),
+                    atm_plus_3_straddle: Math.round(ltpCE[position + 3] + ltpPE[position + 3]),
+                    atm_minus_3_straddle: Math.round(ltpCE[position - 3] + ltpPE[position - 3]),
+
                 };
             } else {
                 throw new Error('Position out of bounds for calculating straddles');
@@ -322,6 +321,13 @@ const fetchOptionsData = async (name, expiry) => {
         let bull_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bull_spread', bull_spread);
         let bear_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bear_spread', bear_spread);
 
+        // Log calculated EMA values for debugging
+       // console.log(`Calculated EMA - Bull Spread EMA: ${bull_spread_ema}, Bear Spread EMA: ${bear_spread_ema}`);
+
+        // If EMA calculation fails or has no previous values, use the last value
+        bull_spread_ema = bull_spread_ema || bull_spread;
+        bear_spread_ema = bear_spread_ema || bear_spread;
+
         if (!firstPrintDone[name] && now >= baselineStartTime) {
             // Set baseline values
             baseline[name] = {
@@ -342,7 +348,7 @@ const fetchOptionsData = async (name, expiry) => {
         const diff_gamma_ce = baseline[name].baseline_gamma_ce !== 0 ? gamma_ce_sum - baseline[name].baseline_gamma_ce : 0;
         const diff_gamma_pe = baseline[name].baseline_gamma_pe !== 0 ? gamma_pe_sum - baseline[name].baseline_gamma_pe : 0;
 
-        // Data to insert to main table
+        // Data to insert to the main table
         const dataToInsert = {
             timestamp,
             vega_ce_sum,
@@ -369,7 +375,7 @@ const fetchOptionsData = async (name, expiry) => {
             date_inserted
         };
 
-        // Data to insert into the optionhedge table
+        // Data to insert into the OPTIONHEDGE table
         const optiondataToInsert = {
             timestamp,
             call_premium: ltp_ce_sum,
@@ -383,6 +389,8 @@ const fetchOptionsData = async (name, expiry) => {
             atm_plus_2_straddle: straddleValues.atm_plus_2_straddle,
             atm_minus_1_straddle: straddleValues.atm_minus_1_straddle,
             atm_minus_2_straddle: straddleValues.atm_minus_2_straddle,
+            atm_plus_3_straddle: straddleValues.atm_plus_3_straddle,
+            atm_minus_3_straddle: straddleValues.atm_minus_3_straddle,
             date_inserted,
             expiry
         };
@@ -416,6 +424,11 @@ const fetchOptionsData = async (name, expiry) => {
                 )
             `);
             insertData(db, name, dataToInsert);
+        });
+
+
+// Inserting data into the OPTIONHEDGE table
+        db.serialize(() => {
             db.run(`
                 CREATE TABLE IF NOT EXISTS OPTIONHEDGE (
                     timestamp TEXT,
@@ -430,19 +443,119 @@ const fetchOptionsData = async (name, expiry) => {
                     atm_plus_2_straddle REAL,
                     atm_minus_1_straddle REAL,
                     atm_minus_2_straddle REAL,
+                    atm_plus_3_straddle REAL,
+                    atm_minus_3_straddle REAL,
                     date_inserted TEXT,
                     expiry TEXT
                 )
-            `);
-            insertOptionData(db, 'OPTIONHEDGE', optiondataToInsert);
+            `, (err) => {
+                if (err) {
+                    console.error('Error creating OPTIONHEDGE table:', err.message);
+                }
+            });
+
+            // Insert data into OPTIONHEDGE table
+            db.run(`
+                INSERT INTO OPTIONHEDGE (
+                    timestamp, call_premium, put_premium, bear_spread, bear_spread_ema,
+                    bull_spread, bull_spread_ema, atm_straddle, atm_plus_1_straddle,
+                    atm_plus_2_straddle, atm_minus_1_straddle, atm_minus_2_straddle,atm_plus_3_straddle,
+                    atm_minus_3_straddle,
+                    date_inserted, expiry
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?)
+            `, [
+                optiondataToInsert.timestamp,
+                optiondataToInsert.call_premium,
+                optiondataToInsert.put_premium,
+                optiondataToInsert.bear_spread,
+                optiondataToInsert.bear_spread_ema,
+                optiondataToInsert.bull_spread,
+                optiondataToInsert.bull_spread_ema,
+                optiondataToInsert.atm_straddle,
+                optiondataToInsert.atm_plus_1_straddle,
+                optiondataToInsert.atm_plus_2_straddle,
+                optiondataToInsert.atm_minus_1_straddle,
+                optiondataToInsert.atm_minus_2_straddle,
+                optiondataToInsert.atm_plus_3_straddle,
+                optiondataToInsert.atm_minus_3_straddle,
+                optiondataToInsert.date_inserted,
+                optiondataToInsert.expiry
+            ], (err) => {
+                if (err) {
+                    console.error('Error inserting data into OPTIONHEDGE table:', err.message);
+                } else {
+                // console.log('EMA values successfully inserted into OPTIONHEDGE table');
+                }
+            });
         });
+
         db.close();
         console.log(`Data inserted successfully into ${name}.db`);
 
     } catch (error) {
-        //console.error(`Error fetching options data for ${name}:`, error);
+        console.error(`Error fetching options data for ${name}:`, error);
     }
 };
+
+// Function to calculate EMA for a given column
+async function calculateEMA(db, tableName, columnName, latestValue) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT ${columnName} FROM ${tableName} ORDER BY timestamp DESC LIMIT 4`, [], (err, rows) => {
+            if (err) {
+                return reject(err);
+            }
+
+            const alpha = 2 / (5 + 1); // EMA period of 5
+
+            if (rows.length === 0) {
+                // No previous data, return the latest value as the EMA
+                return resolve(latestValue);
+            }
+
+            // Calculate EMA
+            let previousEMA = rows.reduce((acc, row, index) => {
+                if (index === 0) {
+                    return row[columnName]; // The first value in the series
+                }
+                return alpha * row[columnName] + (1 - alpha) * acc;
+            }, latestValue);
+
+            let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
+          //  console.log(`EMA Calculated for ${columnName}:`, currentEMA);
+            resolve(currentEMA);
+        });
+    });
+}
+
+// Function to calculate EMA for a given column
+async function calculateEMA(db, tableName, columnName, latestValue) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT ${columnName} FROM ${tableName} ORDER BY timestamp DESC LIMIT 4`, [], (err, rows) => {
+            if (err) {
+                return reject(err);
+            }
+
+            const alpha = 2 / (5 + 1); // EMA period of 5
+
+            if (rows.length === 0) {
+                // No previous data, return the latest value as the EMA
+                return resolve(latestValue);
+            }
+
+            // Calculate EMA
+            let previousEMA = rows.reduce((acc, row, index) => {
+                if (index === 0) {
+                    return row[columnName]; // The first value in the series
+                }
+                return alpha * row[columnName] + (1 - alpha) * acc;
+            }, latestValue);
+
+            let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
+           // console.log(`EMA Calculated for ${columnName}:`, Math.round(currentEMA));
+            resolve(Math.round(currentEMA));
+        });
+    });
+}
 
 const isPastCutoffTime = () => {
     const now = new Date();
@@ -517,8 +630,8 @@ async function calculateEMA(db, tableName, columnName, latestValue) {
             }, latestValue);
 
             let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
-
-            resolve(currentEMA);
+           // console.log("Ema" , Math.round(currentEMA));
+            resolve(Math.round(currentEMA));
         });
     });
 }
@@ -658,10 +771,8 @@ app.post('/options', (req, res) => {
 });
 
 app.get('/api/data', (req, res) => {
-    const {
-        name,
-        date
-    } = req.query;
+    const { name, date } = req.query;
+
     if (!name) {
         return res.status(400).send('Invalid or missing name parameter.');
     }
@@ -669,7 +780,7 @@ app.get('/api/data', (req, res) => {
     const db = new sqlite3.Database(`${name}.db`);
     const selectedDate = date || getTodayDate();
 
-    db.all(`SELECT * FROM ${name} WHERE date_inserted = ?`, [selectedDate], (err, rows) => {
+    db.all(`SELECT * FROM ${name} WHERE date_inserted = ? ORDER BY rowid ASC`, [selectedDate], (err, rows) => {
         if (err) {
             console.error(err.message);
             res.status(500).send('An error occurred while fetching data.');
@@ -721,17 +832,14 @@ app.get('/', (req, res) => {
 
 // API route to fetch straddle data with percentage changes
 app.get('/api/straddle-data', (req, res) => {
-    const {
-        index,
-        date
-    } = req.query;
+    const { index, date } = req.query;
     if (!index || !date) {
         return res.status(400).send('Invalid or missing parameters.');
     }
 
     const db = new sqlite3.Database(`${index}.db`);
 
-    db.all(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY timestamp DESC`, [date], (err, rows) => {
+    db.all(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY rowid DESC LIMIT 11`, [date], (err, rows) => {
         if (err) {
             console.error(err.message);
             return res.status(500).send('An error occurred while fetching data.');
@@ -741,35 +849,44 @@ app.get('/api/straddle-data', (req, res) => {
             return res.status(404).send('No data available for the selected date.');
         }
 
-        const fiveMinutesAgoTimestamp = getFiveMinutesAgoTimestamp();
+        const currentRow = rows[0]; // Most recent entry
+        const previousRow = rows[10] || rows[rows.length - 1]; // Row from 5 minutes ago or the oldest row available (if less than 11 rows)
 
-        const currentRow = rows[0];
-        const previousRow = rows.find(row => row.timestamp <= fiveMinutesAgoTimestamp);
-
-        const result = [{
+        const result = [
+            {
+                strike: 'S-3',
+                value: currentRow.atm_minus_3_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_3_straddle, previousRow.atm_minus_3_straddle)
+            },
+            {
                 strike: 'S-2',
                 value: currentRow.atm_minus_2_straddle,
-                changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow ? previousRow.atm_minus_2_straddle : null)
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow.atm_minus_2_straddle)
             },
             {
                 strike: 'S-1',
                 value: currentRow.atm_minus_1_straddle,
-                changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow ? previousRow.atm_minus_1_straddle : null)
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow.atm_minus_1_straddle)
             },
             {
                 strike: 'S0',
                 value: currentRow.atm_straddle,
-                changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow ? previousRow.atm_straddle : null)
+                changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow.atm_straddle)
             },
             {
                 strike: 'S+1',
                 value: currentRow.atm_plus_1_straddle,
-                changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow ? previousRow.atm_plus_1_straddle : null)
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow.atm_plus_1_straddle)
             },
             {
                 strike: 'S+2',
                 value: currentRow.atm_plus_2_straddle,
-                changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow ? previousRow.atm_plus_2_straddle : null)
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow.atm_plus_2_straddle)
+            },
+            {
+                strike: 'S+3',
+                value: currentRow.atm_plus_3_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_3_straddle, previousRow.atm_plus_3_straddle)
             }
         ];
 
@@ -779,26 +896,34 @@ app.get('/api/straddle-data', (req, res) => {
     db.close();
 });
 
+
+
 //API route to fetch initial vlaues for the straddle data
 app.get('/api/initial-values', (req, res) => {
-    const {
-        index,
-        date
-    } = req.query;
+    const { index, date } = req.query;
+
     if (!index || !date) {
         return res.status(400).send('Invalid or missing parameters.');
     }
 
     const db = new sqlite3.Database(`${index}.db`);
 
-    db.get(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? AND timestamp = '09:20:00' LIMIT 1`, [date], (err, row) => {
+    // Adjust the query to select any row with a timestamp between 09:20:00 and 09:21:00
+    db.get(`
+        SELECT * 
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        AND timestamp >= '9:20:00' 
+        AND timestamp < '9:22:00'
+        LIMIT 1
+    `, [date], (err, row) => {
         if (err) {
             console.error(err.message);
             return res.status(500).send('An error occurred while fetching initial values.');
         }
 
         if (!row) {
-            return res.status(404).send('No data found for 09:20 AM.');
+            return res.status(404).send('No data found between 09:20 AM and 09:21 AM.');
         }
 
         const a = row.bull_spread * 1.15;
@@ -826,7 +951,7 @@ app.get('/api/live-values', (req, res) => {
     }
 
     const db = new sqlite3.Database(`${index}.db`);
-    db.get(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY timestamp DESC LIMIT 1`, [date], (err, row) => {
+    db.get(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY rowid DESC LIMIT 1`, [date], (err, row) => {
         if (err) {
             console.error(err.message);
             return res.status(500).send('An error occurred while fetching live values.');
@@ -835,7 +960,7 @@ app.get('/api/live-values', (req, res) => {
         if (!row) {
             return res.status(404).send('No live data found for the selected date.');
         }
-
+        //console.log("ROWSSS",row);
         const e = row.bull_spread;
         const f = row.bear_spread;
         const bull_spread_ema = row.bull_spread_ema;
