@@ -12,6 +12,12 @@
 </head>
 
 <body>
+<!-- Audio element to play the sound -->
+    <audio id="alert-sound" src="A1.mp3" preload="auto"></audio>
+
+    <!-- Placeholder for the alert message -->
+    <div id="alert-container"></div>
+
     <div class="header">
         <span id="current-date-time"></span>
         <select id="index-select">
@@ -117,29 +123,32 @@
     <script>
         const socket = io();
 
-        socket.on('signalChanged', function(signal) {
-            displayNotification(signal);
-        });
+        // Function to show the notification
+        function showNotification(message) {
+            if (Notification.permission === 'granted') {
+                const notification = new Notification('New Alert', {
+                    body: message,
+                    icon: '2image.png' // Optional: Path to an icon image
+                });
 
-        function displayNotification(signal) {
-            // Check if notifications are supported by the browser
-            if ("Notification" in window) {
-                // Request permission if it hasn't been granted yet
-                if (Notification.permission === "granted") {
-                    new Notification(`Alert: ${signal}`);
-                } else if (Notification.permission !== "denied") {
-                    Notification.requestPermission().then(permission => {
-                        if (permission === "granted") {
-                            new Notification(`Alert: ${signal}`);
-                        }
-                    });
-                }
+                // Play the alert sound
+                const audio = document.getElementById('alert-sound');
+                audio.play();
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        showNotification(message);
+                    }
+                });
             }
-
-            // Play a sound
-            const audio = new Audio('A1.mp3'); // Add your alert sound file in the project
-            audio.play();
         }
+
+        // Listen for the 'alert' event from the server
+        socket.on('alert', (message) => {
+            showNotification(message);
+            // Optionally, display the message in the DOM
+            //document.getElementById('alert-container').innerText = message;
+        });
     </script>
 </body>
 

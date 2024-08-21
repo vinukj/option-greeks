@@ -22,12 +22,30 @@ document.addEventListener('DOMContentLoaded', function () {
     let previousValueE = null;
     let previousValueF = null;
 
+    // Function to apply conditional formatting
+    function applyConditionalFormatting() {
+        // Check if value-e > value-a
+        if (parseFloat(bullSpreadEMA.textContent) > parseFloat(valueA.textContent)) {
+            bullSpreadEMA.classList.add('highlight');
+        } else {
+            bullSpreadEMA.classList.remove('highlight');
+        }
+
+        // Check if value-f > value-c
+        if (parseFloat(bearSpreadEMA.textContent) > parseFloat(valueC.textContent)) {
+            bearSpreadEMA.classList.add('highlight');
+        } else {
+            bearSpreadEMA.classList.remove('highlight');
+        }
+    }
+
+    // Apply formatting on load
+    applyConditionalFormatting();
+
     if (!tableBody || !valueA || !valueB || !valueC || !valueD || !valueE || !valueF || !signalCell || !bullSpreadEMA || !bearSpreadEMA || !trendCell) {
         console.error('One or more required elements are missing in the DOM.');
         return;
     }
-
-    let a, b, c, d, e, f, g, h;
 
     const today = new Date().toISOString().split('T')[0];
     dateSelect.value = today;
@@ -35,91 +53,33 @@ document.addEventListener('DOMContentLoaded', function () {
     indexSelect.addEventListener('change', updateData);
     dateSelect.addEventListener('change', updateData);
 
-    function updateData() {
-        fetchInitialValues().then(() => {
-            fetchLastLiveValues();
-        });
+    async function updateData() {
+        fetchCombinedValues();
         fetchData();
     }
 
-    async function fetchData() {
+    async function fetchCombinedValues() {
         const selectedIndex = indexSelect.value;
         const selectedDate = dateSelect.value;
 
         try {
-            const response = await fetch(`/api/straddle-data?index=${selectedIndex}&date=${selectedDate}`);
+            const response = await fetch(`/api/combined-values?index=${selectedIndex}&date=${selectedDate}`);
             const data = await response.json();
 
-            tableBody.innerHTML = ''; 
+            if (data && data.initialValues && data.latestValues) {
+                const { initialValues, latestValues, signal } = data;
 
-            if (data && data.length) {
-                data.forEach((row, index) => {
-                    const tr = document.createElement('tr');
-                    const valueChangeHtml = generateValueChangeHtml(row.value, row.changePercentage);
+                // Update initial values
+                valueA.textContent = initialValues.a.toFixed(2);
+                valueB.textContent = initialValues.b.toFixed(2);
+                valueC.textContent = initialValues.c.toFixed(2);
+                valueD.textContent = initialValues.d.toFixed(2);
 
-                    tr.innerHTML = `
-                        <td>${row.strike}</td>
-                        <td>${valueChangeHtml}</td>
-                        ${index === 2 ? `<td>${calculateTrend(data)}</td>` : '<td></td>'}
-                    `;
-
-                    if (index === 2) {
-                        trendCell.textContent = calculateTrend(data); // Set trend in the merged cell
-                    }
-
-                    tableBody.appendChild(tr);
-                });
-            } else {
-                tableBody.innerHTML = '<tr><td colspan="3">No data available</td></tr>';
-            }
-        } catch (error) {
-            console.error('Error fetching data:', error);
-            tableBody.innerHTML = '<tr><td colspan="3">Error fetching data</td></tr>';
-        }
-    }
-
-    async function fetchInitialValues() {
-        const selectedIndex = indexSelect.value;
-        const selectedDate = dateSelect.value;
-
-        try {
-            const response = await fetch(`/api/initial-values?index=${selectedIndex}&date=${selectedDate}`);
-            const data = await response.json();
-
-            if (data) {
-                a = data.a;
-                b = data.b;
-                c = data.c;
-                d = data.d;
-
-                valueA.textContent = a.toFixed(2);
-                valueB.textContent = b.toFixed(2);
-                valueC.textContent = c.toFixed(2);
-                valueD.textContent = d.toFixed(2);
-            } else {
-                valueA.textContent = 'N/A';
-                valueB.textContent = 'N/A';
-                valueC.textContent = 'N/A';
-                valueD.textContent = 'N/A';
-            }
-        } catch (error) {
-            console.error('Error fetching initial values:', error);
-        }
-    }
-
-    async function fetchLastLiveValues() {
-        const selectedIndex = indexSelect.value;
-        const selectedDate = dateSelect.value;
-
-        try {
-            const response = await fetch(`/api/live-values?index=${selectedIndex}&date=${selectedDate}`);
-            const data = await response.json();
-
-            if (data) {
-                e = parseFloat(data.e);
-                f = parseFloat(data.f);
-                g = parseFloat(data.bull_spread_ema);
-                h = parseFloat(data.bear_spread_ema);
+                // Update live values
+                const e = parseFloat(latestValues.e);
+                const f = parseFloat(latestValues.f);
+                const g = parseFloat(latestValues.bull_spread_ema);
+                const h = parseFloat(latestValues.bear_spread_ema);
 
                 // Calculate percentage changes from previous values
                 const percentageChangeE = previousValueE !== null ? ((e - previousValueE) / previousValueE) * 100 : 0;
@@ -141,10 +101,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 bullSpreadEMA.textContent = g.toFixed(2);
                 bearSpreadEMA.textContent = h.toFixed(2);
 
-                // Calculate and display the signal
-                const signal = calculateSignal(a, b, c, d, e, f, g, h);
+                // Display the signal
                 signalCell.textContent = signal;
             } else {
+                valueA.textContent = 'N/A';
+                valueB.textContent = 'N/A';
+                valueC.textContent = 'N/A';
+                valueD.textContent = 'N/A';
                 valueE.textContent = 'N/A';
                 valueF.textContent = 'N/A';
                 bullSpreadEMA.textContent = 'N/A';
@@ -152,7 +115,45 @@ document.addEventListener('DOMContentLoaded', function () {
                 signalCell.textContent = 'N/A';
             }
         } catch (error) {
-            console.error('Error fetching last live values:', error);
+            console.error('Error fetching combined values:', error);
+        }
+
+        applyConditionalFormatting();
+    }
+
+    async function fetchData() {
+        const selectedIndex = indexSelect.value;
+        const selectedDate = dateSelect.value;
+
+        try {
+            const response = await fetch(`/api/straddle-data?index=${selectedIndex}&date=${selectedDate}`);
+            const data = await response.json();
+
+            tableBody.innerHTML = '';
+
+            if (data && data.straddles && data.straddles.length) {
+                data.straddles.forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    const valueChangeHtml = generateValueChangeHtml(row.value, row.changePercentage);
+
+                    tr.innerHTML = `
+                        <td>${row.strike}</td>
+                        <td>${valueChangeHtml}</td>
+                        ${index === 2 ? `<td>${data.signal}</td>` : '<td></td>'}
+                    `;
+
+                    if (index === 2) {
+                        trendCell.textContent = data.signal; // Set signal in the merged cell
+                    }
+
+                    tableBody.appendChild(tr);
+                });
+            } else {
+                tableBody.innerHTML = '<tr><td colspan="3">No data available</td></tr>';
+            }
+        } catch (error) {
+            console.error('Error fetching data:', error);
+            tableBody.innerHTML = '<tr><td colspan="3">Error fetching data</td></tr>';
         }
     }
 
@@ -170,90 +171,9 @@ document.addEventListener('DOMContentLoaded', function () {
         `;
     }
 
-    function calculateSignal(a, b, c, d, e, f, g, h) {
-        let newSignal;
-    
-        if (e > a && e > g && f < d && f < h) {
-            newSignal = "Trending Buy CE";
-        } else if (f > c && f > g && e < b && e < g) {
-            newSignal = "Trending Buy PE";
-        } else if (e > a && e > g) {
-            newSignal = "Buy CE";
-        } else if (f > c && f > g) {
-            newSignal = "Buy PE";
-        } else if (a < e && e < b && c < f && f < d) {
-            newSignal = "Range Bound";
-        } else if (e < b && e < g && f < d && f < h) {
-            newSignal = "No Momentum";
-        } else {
-            newSignal = "No Clear Direction";
-        }
-    
-        return newSignal;
-    }
-
-    function calculateTrend(data) {
-        const atmMinus2 = data[0].changePercentage;
-        const atmMinus1 = data[1].changePercentage;
-        const atm = data[2].changePercentage;  // ATM (S0) is typically the "current" strike
-        const atmPlus1 = data[3].changePercentage;
-        const atmPlus2 = data[4].changePercentage;
-    
-        // All premiums rising
-        if (atmMinus2 > 0 && atmMinus1 > 0 && atmPlus1 > 0 && atmPlus2 > 0) {
-            return "Higher Volatility; Watch for Breakout";
-        }
-    
-        // All premiums decreasing
-        if (atmMinus2 < 0 && atmMinus1 < 0 && atmPlus1 < 0 && atmPlus2 < 0) {
-            return "Consolidation or Range Bound Movement";
-        }
-    
-        // Bearish trend
-        if (atmMinus2 < 0 && atmMinus1 < 0) {
-            return "Bearish Trend";
-        }
-    
-        // Bullish trend
-        if (atmPlus1 < 0 && atmPlus2 < 0) {
-            return "Bullish Trend";
-        }
-    
-        // Bullish bias
-        if (atmPlus2 > 0) {
-            return "Bullish Bias; Expect Upward Move";
-        }
-    
-        // Bearish bias
-        if (atmMinus2 > 0) {
-            return "Bearish Bias; Expect Downward Move";
-        }
-    
-        // Default condition
-        return "No Clear Trend";
-    }
-
-    // Function to send telegram message alerts
-    const sendTelegramAlert = (message) => {
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const chatId = process.env.TELEGRAM_CHAT_ID;
-        const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-
-        axios.post(url, {
-            chat_id: chatId,
-            text: message
-        })
-        .then(response => {
-            console.log('Message sent to Telegram');
-        })
-        .catch(error => {
-            console.error('Error sending message to Telegram:', error);
-        });
-    };
-
     // Fetch data and initial values when the page loads
     updateData();
 
     // Poll live values every minute
-    setInterval(fetchLastLiveValues, 60000);
+    setInterval(fetchCombinedValues, 60000);
 });

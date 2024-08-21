@@ -140,115 +140,25 @@ const insertOptionData = (db, tableName, optiondataToInsert) => {
         put_premium,
         bear_spread,
         bull_spread,
-        bear_spread_ema,
-        bull_spread_ema,
         atm_straddle,
         atm_plus_1_straddle,
         atm_plus_2_straddle,
-        atm_plus_3_straddle,
         atm_minus_1_straddle,
         atm_minus_2_straddle,
-        atm_minus_3_straddle,
-        base_atm,
         date_inserted,
         expiry
     } = optiondataToInsert;
 
     db.run(`INSERT INTO ${tableName} (
-        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema,
-        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,atm_plus_3_straddle,
-        atm_minus_1_straddle, atm_minus_2_straddle,atm_minus_3_straddle,base_atm, date_inserted, expiry
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?)`, [
-        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema,
-        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,atm_plus_3_straddle,
-        atm_minus_1_straddle, atm_minus_2_straddle,atm_minus_3_straddle,base_atm, date_inserted, expiry
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,
+        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,
+        atm_minus_1_straddle, atm_minus_2_straddle, date_inserted, expiry
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,
+        atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,
+        atm_minus_1_straddle, atm_minus_2_straddle, date_inserted, expiry
     ]);
 };
-
-//Monitor Alerts
-const monitoringInterval = 30000; // Check every 30 seconds
-function monitorSignal(index) {
-    const todayDate = getTodayDate();
-    const db = new sqlite3.Database(`${index}.db`);
-
-    // Query to get initial values
-    const getInitialValuesQuery = `
-        SELECT * 
-        FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        AND timestamp >= '9:20:00' 
-        AND timestamp < '9:22:00'
-        LIMIT 1
-    `;
-
-    // Query to get the latest values
-    const getLatestValuesQuery = `
-        SELECT * FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        ORDER BY rowid DESC LIMIT 1
-    `;
-
-    // Get initial values once when the server starts
-    db.get(getInitialValuesQuery, [todayDate], (err, initialRow) => {
-        if (err) {
-            console.error('Error fetching initial values:', err.message);
-            return;
-        }
-
-        if (!initialRow) {
-            console.error('No initial data found.');
-            return;
-        }
-
-        const a = initialRow.bull_spread * process.env.UPPER_RANGE;
-        const b = initialRow.bull_spread * process.env.LOWER_RANGE;
-        const c = initialRow.bear_spread * process.env.UPPER_RANGE;
-        const d = initialRow.bear_spread * process.env.LOWER_RANGE;
-
-        // Start monitoring for changes
-        setInterval(() => {
-            db.get(getLatestValuesQuery, [todayDate], (err, latestRow) => {
-                if (err) {
-                    console.error('Error fetching latest values:', err.message);
-                    return;
-                }
-
-                if (!latestRow) {
-                    console.error('No latest data found.');
-                    return;
-                }
-
-                const e = latestRow.bull_spread;
-                const f = latestRow.bear_spread;
-                const bull_spread_ema = latestRow.bull_spread_ema;
-                const bear_spread_ema = latestRow.bear_spread_ema;
-
-                // Determine the signal based on the values
-                let signal = 'No Trend';
-
-                if (bull_spread_ema > a) {
-                    signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
-                } else if (bear_spread_ema > c) {
-                    signal = `${index} : BEARISH -> Buy PE OR BEAR PUT SPREAD`;
-                }
-
-                // Send notification if there's a valid signal
-                if (signal !== 'No Trend') {
-                    sendNotification(signal);
-                }
-
-            });
-        }, monitoringInterval);
-
-    });
-
-    db.close();
-}
-
-// Start monitoring for each index
-monitorSignal('NIFTY');
-monitorSignal('BANKNIFTY');
-
 
 
 //Fetching data from Aliceblue 1ly api 
@@ -291,9 +201,8 @@ const fetchOptionsData = async (name, expiry) => {
                 'Content-Type': 'application/json',
                 'Authorization': AUTHBEARERTOKEN
             }
-        });
+        });        
 
-        const db = new sqlite3.Database(`${name}.db`);
         const strikeList = response.data.strike_list;
         const atmvalue = response.data.atm_values.strike_price;
         const vegaCE = response.data.greeks.vega_ce;
@@ -305,33 +214,13 @@ const fetchOptionsData = async (name, expiry) => {
         const ltpCE = response.data.ltp_ce_list;
         const ltpPE = response.data.ltp_pe_list;
 
-       const getSetBaseATM = async (db, atmvalue) => {
-        return new Promise((resolve, reject) => {
-            db.get(`SELECT base_atm FROM OPTIONHEDGE ORDER BY rowid DESC LIMIT 1`, [], (err, row) => {
-                if (err) {
-                    console.error('Error retrieving base_atm from OPTIONHEDGE table:', err.message);
-                    // Assign new value if there is an error
-                    resolve(newATMValue);
-                } else if (!row || row.base_atm === null || row.base_atm === 0 || row.base_atm === undefined) {
-                    // If the retrieved value is null, 0, or undefined, use the new ATM value
-                    console.log('Base ATM value is null, 0, or undefined. Using new ATM value.');
-                    resolve(newATMValue);
-                } else {
-                    // If a valid value is retrieved, use it
-                    console.log(`Base ATM value retrieved from the database: ${row.base_atm}`);
-                    resolve(row.base_atm);
-                }
-            });
-        });
-        };    
-        const baseAtm = await getSetBaseATM(db, atmvalue);
-
-        console.log(`Position of ${baseAtm} in strike list:`, findAtmPosition(strikeList, baseAtm));
-
-        function findAtmPosition(strikeList, baseAtm) {
-            const index = strikeList.findIndex(strike => parseInt(strike, 10) === baseAtm);
+        console.log("ATM Value ", atmvalue);
+        // Ensure helper functions are defined before usage
+        function findAtmPosition(strikeList, atmvalue) {
+            const index = strikeList.findIndex(strike => strike === atmvalue);
             return index !== -1 ? index : 'ATM value not found in strike list';
         }
+
 
         function sumFromStartPosition(array, startPosition) {
             if (startPosition < 0 || startPosition >= array.length) {
@@ -372,6 +261,7 @@ const fetchOptionsData = async (name, expiry) => {
             return Math.round(sum / elements.length);
         }
 
+        // Function to calculate Bull Spread
         function BullSpread(ltpCE, position) {
             if (position + 4 < ltpCE.length) {
                 return Math.round(ltpCE[position] - ltpCE[position + 4]);
@@ -380,14 +270,16 @@ const fetchOptionsData = async (name, expiry) => {
             }
         }
 
+        // Function to calculate Bear Spread    
         function BearSpread(ltpPE, position) {
             if (position - 5 >= 0) {
-                return Math.round(ltpPE[position] - ltpPE[position - 4]);
+                return Math.round(ltpPE[position - 1] - ltpPE[position - 5]);
             } else {
                 throw new Error('Position - 5 is less than 0 in ltpPE array');
             }
         }
 
+        // Function to calculate Straddle values
         function Straddle(ltpCE, ltpPE, position) {
             if (position - 3 >= 0 && position + 3 < ltpCE.length && position + 3 < ltpPE.length) {
                 return {
@@ -398,117 +290,14 @@ const fetchOptionsData = async (name, expiry) => {
                     atm_minus_2_straddle: Math.round(ltpCE[position - 2] + ltpPE[position - 2]),
                     atm_plus_3_straddle: Math.round(ltpCE[position + 3] + ltpPE[position + 3]),
                     atm_minus_3_straddle: Math.round(ltpCE[position - 3] + ltpPE[position - 3]),
+
                 };
             } else {
                 throw new Error('Position out of bounds for calculating straddles');
             }
         }
 
-
-//         function Straddle(ltpCE, ltpPE, position) {
-//     if (position - 3 >= 0 && position + 3 < ltpCE.length && position + 3 < ltpPE.length) {
-//         const atm_straddle = Math.round(ltpCE[position] + ltpPE[position]);
-//         const atm_plus_1_straddle = Math.round(ltpCE[position + 1] + ltpPE[position + 1]);
-//         const atm_plus_2_straddle = Math.round(ltpCE[position + 2] + ltpPE[position + 2]);
-//         const atm_minus_1_straddle = Math.round(ltpCE[position - 1] + ltpPE[position - 1]);
-//         const atm_minus_2_straddle = Math.round(ltpCE[position - 2] + ltpPE[position - 2]);
-//         const atm_plus_3_straddle = Math.round(ltpCE[position + 3] + ltpPE[position + 3]);
-//         const atm_minus_3_straddle = Math.round(ltpCE[position - 3] + ltpPE[position - 3]);
-
-//         let signal = 'No trend'; // Default signal
-
-//         // Check if atm_plus_1, atm_plus_2, atm_plus_3 are all decreasing
-//         if (
-//             atm_plus_3_straddle < atm_plus_2_straddle &&
-//             atm_plus_2_straddle < atm_plus_1_straddle &&
-//             atm_plus_1_straddle < atm_straddle
-//         ) {
-//             signal = 'Market will not fall, possibility of upside';
-//         }
-
-//         // Check if atm_minus_1, atm_minus_2, atm_minus_3 are all decreasing
-//         else if (
-//             atm_minus_3_straddle < atm_minus_2_straddle &&
-//             atm_minus_2_straddle < atm_minus_1_straddle &&
-//             atm_minus_1_straddle < atm_straddle
-//         ) {
-//             signal = 'Bearish trend';
-//         }
-
-//         // Check if all straddle values are rising
-//         else if (
-//             atm_plus_3_straddle > atm_plus_2_straddle &&
-//             atm_plus_2_straddle > atm_plus_1_straddle &&
-//             atm_plus_1_straddle > atm_straddle &&
-//             atm_minus_1_straddle > atm_straddle &&
-//             atm_minus_2_straddle > atm_minus_1_straddle &&
-//             atm_minus_3_straddle > atm_minus_2_straddle
-//         ) {
-//             signal = 'Breakout';
-//         }
-
-//         // Check if all straddle values are decreasing
-//         else if (
-//             atm_plus_3_straddle < atm_plus_2_straddle &&
-//             atm_plus_2_straddle < atm_plus_1_straddle &&
-//             atm_plus_1_straddle < atm_straddle &&
-//             atm_minus_1_straddle < atm_straddle &&
-//             atm_minus_2_straddle < atm_minus_1_straddle &&
-//             atm_minus_3_straddle < atm_minus_2_straddle
-//         ) {
-//             signal = 'Market is range bound';
-//         }
-
-//         return {
-//             atm_straddle,
-//             atm_plus_1_straddle,
-//             atm_plus_2_straddle,
-//             atm_plus_3_straddle,
-//             atm_minus_1_straddle,
-//             atm_minus_2_straddle,
-//             atm_minus_3_straddle,
-//             signal
-//         };
-//     } else {
-//         throw new Error('Position out of bounds for calculating straddles');
-//     }
-// }
-
-        function calculateLtpSumAroundPosition(position, ltp_ce, ltp_pe) {
-            // Calculate the range of indices to sum (position - 2 to position + 2)
-            const indicesToSum = [
-                position - 2,
-                position - 1,
-                position,
-                position + 1,
-                position + 2
-            ];
-        
-            let ceSum = 0;
-            let peSum = 0;
-        
-            indicesToSum.forEach(index => {
-                if (index >= 0 && index < ltp_ce.length && index < ltp_pe.length) { // Ensure index is within bounds
-                    ceSum += ltp_ce[index];
-                    peSum += ltp_pe[index];
-                    // console.log(`Summing CE at index ${index}: ${ltp_ce[index]}`);
-                    // console.log(`Summing PE at index ${index}: ${ltp_pe[index]}`);
-                } else {
-                    console.log(`Index out of bounds: ${index}`);
-                }
-            });
-        
-            // console.log(`Final CE Sum: ${ceSum}`);
-            // console.log(`Final PE Sum: ${peSum}`);
-        
-            return {
-                ceSum: Math.round(ceSum),
-                peSum: Math.round(peSum)
-            };
-        }
-
-        const position = findAtmPosition(strikeList, baseAtm);
-        console.log("Position ", position);
+        const position = findAtmPosition(strikeList, atmvalue);
 
         const vega_ce_sum = sumFromStartPosition(vegaCE, position - 1);
         const vega_pe_sum = sumToPosition(vegaPE, position);
@@ -517,31 +306,30 @@ const fetchOptionsData = async (name, expiry) => {
         const gamma_ce_sum = sumFromStartPosition(gammaCE, position - 1);
         const gamma_pe_sum = sumToPosition(gammaPE, position);
 
-        // const ltp_ce_sum = calculateAverage(position - 1, 5, ltpCE, 'downwards');
-        // const ltp_pe_sum = calculateAverage(position + 1, 5, ltpPE, 'upwards');
-
-        const atmsums = calculateLtpSumAroundPosition(position, ltpCE, ltpPE);
-    
-        // console.log('Sum of LTP CE around position:', atmsums.ceSum);
-        // console.log('Sum of LTP PE around position:', atmsums.peSum);
-
-        const ltp_ce_sum = atmsums.ceSum;
-        const ltp_pe_sum = atmsums.peSum;
+        const ltp_ce_sum = calculateAverage(position - 1, 5, ltpCE, 'downwards');
+        const ltp_pe_sum = calculateAverage(position + 1, 5, ltpPE, 'upwards');
 
         const timestamp = new Date().toLocaleTimeString();
         const date_inserted = getTodayDate();
-
+        
         const bull_spread = BullSpread(ltpCE, position);
         const bear_spread = BearSpread(ltpPE, position);
         const straddleValues = Straddle(ltpCE, ltpPE, position);
-
+        
+        // Calculate EMA for bull_spread and bear_spread
+        const db = new sqlite3.Database(`${name}.db`);
         let bull_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bull_spread', bull_spread);
         let bear_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bear_spread', bear_spread);
 
+        // Log calculated EMA values for debugging
+       // console.log(`Calculated EMA - Bull Spread EMA: ${bull_spread_ema}, Bear Spread EMA: ${bear_spread_ema}`);
+
+        // If EMA calculation fails or has no previous values, use the last value
         bull_spread_ema = bull_spread_ema || bull_spread;
         bear_spread_ema = bear_spread_ema || bear_spread;
 
         if (!firstPrintDone[name] && now >= baselineStartTime) {
+            // Set baseline values
             baseline[name] = {
                 baseline_vega_ce: vega_ce_sum,
                 baseline_vega_pe: vega_pe_sum,
@@ -599,11 +387,10 @@ const fetchOptionsData = async (name, expiry) => {
             atm_straddle: straddleValues.atm_straddle,
             atm_plus_1_straddle: straddleValues.atm_plus_1_straddle,
             atm_plus_2_straddle: straddleValues.atm_plus_2_straddle,
-            atm_plus_3_straddle: straddleValues.atm_plus_3_straddle,
             atm_minus_1_straddle: straddleValues.atm_minus_1_straddle,
             atm_minus_2_straddle: straddleValues.atm_minus_2_straddle,
+            atm_plus_3_straddle: straddleValues.atm_plus_3_straddle,
             atm_minus_3_straddle: straddleValues.atm_minus_3_straddle,
-            base_atm: baseAtm, // Use the correct variable
             date_inserted,
             expiry
         };
@@ -639,6 +426,8 @@ const fetchOptionsData = async (name, expiry) => {
             insertData(db, name, dataToInsert);
         });
 
+
+// Inserting data into the OPTIONHEDGE table
         db.serialize(() => {
             db.run(`
                 CREATE TABLE IF NOT EXISTS OPTIONHEDGE (
@@ -656,7 +445,6 @@ const fetchOptionsData = async (name, expiry) => {
                     atm_minus_2_straddle REAL,
                     atm_plus_3_straddle REAL,
                     atm_minus_3_straddle REAL,
-                    base_atm INTEGER,
                     date_inserted TEXT,
                     expiry TEXT
                 )
@@ -666,13 +454,15 @@ const fetchOptionsData = async (name, expiry) => {
                 }
             });
 
+            // Insert data into OPTIONHEDGE table
             db.run(`
                 INSERT INTO OPTIONHEDGE (
                     timestamp, call_premium, put_premium, bear_spread, bear_spread_ema,
                     bull_spread, bull_spread_ema, atm_straddle, atm_plus_1_straddle,
-                    atm_plus_2_straddle, atm_minus_1_straddle, atm_minus_2_straddle,
-                    atm_plus_3_straddle, atm_minus_3_straddle, base_atm, date_inserted, expiry
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    atm_plus_2_straddle, atm_minus_1_straddle, atm_minus_2_straddle,atm_plus_3_straddle,
+                    atm_minus_3_straddle,
+                    date_inserted, expiry
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?)
             `, [
                 optiondataToInsert.timestamp,
                 optiondataToInsert.call_premium,
@@ -688,14 +478,13 @@ const fetchOptionsData = async (name, expiry) => {
                 optiondataToInsert.atm_minus_2_straddle,
                 optiondataToInsert.atm_plus_3_straddle,
                 optiondataToInsert.atm_minus_3_straddle,
-                optiondataToInsert.base_atm,
                 optiondataToInsert.date_inserted,
                 optiondataToInsert.expiry
             ], (err) => {
                 if (err) {
                     console.error('Error inserting data into OPTIONHEDGE table:', err.message);
                 } else {
-                    console.log('Data successfully inserted into OPTIONHEDGE table.');
+                // console.log('EMA values successfully inserted into OPTIONHEDGE table');
                 }
             });
         });
@@ -708,35 +497,35 @@ const fetchOptionsData = async (name, expiry) => {
     }
 };
 
-// // Function to calculate EMA for a given column
-// async function calculateEMA(db, tableName, columnName, latestValue) {
-//     return new Promise((resolve, reject) => {
-//         db.all(`SELECT ${columnName} FROM ${tableName} ORDER BY timestamp DESC LIMIT 4`, [], (err, rows) => {
-//             if (err) {
-//                 return reject(err);
-//             }
+// Function to calculate EMA for a given column
+async function calculateEMA(db, tableName, columnName, latestValue) {
+    return new Promise((resolve, reject) => {
+        db.all(`SELECT ${columnName} FROM ${tableName} ORDER BY timestamp DESC LIMIT 4`, [], (err, rows) => {
+            if (err) {
+                return reject(err);
+            }
 
-//             const alpha = 2 / (5 + 1); // EMA period of 5
+            const alpha = 2 / (5 + 1); // EMA period of 5
 
-//             if (rows.length === 0) {
-//                 // No previous data, return the latest value as the EMA
-//                 return resolve(latestValue);
-//             }
+            if (rows.length === 0) {
+                // No previous data, return the latest value as the EMA
+                return resolve(latestValue);
+            }
 
-//             // Calculate EMA
-//             let previousEMA = rows.reduce((acc, row, index) => {
-//                 if (index === 0) {
-//                     return row[columnName]; // The first value in the series
-//                 }
-//                 return alpha * row[columnName] + (1 - alpha) * acc;
-//             }, latestValue);
+            // Calculate EMA
+            let previousEMA = rows.reduce((acc, row, index) => {
+                if (index === 0) {
+                    return row[columnName]; // The first value in the series
+                }
+                return alpha * row[columnName] + (1 - alpha) * acc;
+            }, latestValue);
 
-//             let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
-//           //  console.log(`EMA Calculated for ${columnName}:`, currentEMA);
-//             resolve(currentEMA);
-//         });
-//     });
-// }
+            let currentEMA = alpha * latestValue + (1 - alpha) * previousEMA;
+          //  console.log(`EMA Calculated for ${columnName}:`, currentEMA);
+            resolve(currentEMA);
+        });
+    });
+}
 
 // Function to calculate EMA for a given column
 async function calculateEMA(db, tableName, columnName, latestValue) {
@@ -771,13 +560,11 @@ async function calculateEMA(db, tableName, columnName, latestValue) {
 const isPastCutoffTime = () => {
     const now = new Date();
     const cutoffTime = new Date();
-    cutoffTime.setHours(23, 35, 0, 0); // 3:35 PM
+    cutoffTime.setHours(15, 35, 0, 0); // 3:35 PM
     return now >= cutoffTime;
 };
 
 const startFetchingData = (name, expiry) => {
-
-    //fetchOptionsData(name, expiry); // comment this and uncomment below lines to work live
     const now = new Date();
 
     // Use the values from the .env file
@@ -867,7 +654,7 @@ function sendNotification(signal) {
 
     if (telegramBotToken && telegramChatId) {
         const telegramUrl = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
-        const message = `Signal Alert: ${signal}`;
+        const message = `Trading Signal Alert: ${signal}`;
         axios.post(telegramUrl, {
             chat_id: telegramChatId,
             text: message
@@ -903,7 +690,6 @@ startFetchingData('NIFTY', process.env.nifty);
 startFetchingData('BANKNIFTY', process.env.bankNifty);
 startFetchingData('FINNIFTY', process.env.finnifty);
 startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
-
 
 // Update .env file with new settings
 app.post('/update-settings', (req, res) => {
@@ -1045,71 +831,6 @@ app.get('/', (req, res) => {
 });
 
 // API route to fetch straddle data with percentage changes
-// app.get('/api/straddle-data', (req, res) => {
-//     const { index, date } = req.query;
-//     if (!index || !date) {
-//         return res.status(400).send('Invalid or missing parameters.');
-//     }
-
-//     const db = new sqlite3.Database(`${index}.db`);
-
-//     db.all(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY rowid DESC LIMIT 11`, [date], (err, rows) => {
-//         if (err) {
-//             console.error(err.message);
-//             return res.status(500).send('An error occurred while fetching data.');
-//         }
-
-//         if (!rows || rows.length === 0) {
-//             return res.status(404).send('No data available for the selected date.');
-//         }
-
-//         const currentRow = rows[0]; // Most recent entry
-//         const previousRow = rows[10] || rows[rows.length - 1]; // Row from 5 minutes ago or the oldest row available (if less than 11 rows)
-
-//         const result = [
-//             {
-//                 strike: 'S-3',
-//                 value: currentRow.atm_minus_3_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_3_straddle, previousRow.atm_minus_3_straddle)
-//             },
-//             {
-//                 strike: 'S-2',
-//                 value: currentRow.atm_minus_2_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow.atm_minus_2_straddle)
-//             },
-//             {
-//                 strike: 'S-1',
-//                 value: currentRow.atm_minus_1_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow.atm_minus_1_straddle)
-//             },
-//             {
-//                 strike: 'S0',
-//                 value: currentRow.atm_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow.atm_straddle)
-//             },
-//             {
-//                 strike: 'S+1',
-//                 value: currentRow.atm_plus_1_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow.atm_plus_1_straddle)
-//             },
-//             {
-//                 strike: 'S+2',
-//                 value: currentRow.atm_plus_2_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow.atm_plus_2_straddle)
-//             },
-//             {
-//                 strike: 'S+3',
-//                 value: currentRow.atm_plus_3_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_3_straddle, previousRow.atm_plus_3_straddle)
-//             }
-//         ];
-
-//         res.json(result);
-//     });
-
-//     db.close();
-// });
-
 app.get('/api/straddle-data', (req, res) => {
     const { index, date } = req.query;
     if (!index || !date) {
@@ -1131,99 +852,50 @@ app.get('/api/straddle-data', (req, res) => {
         const currentRow = rows[0]; // Most recent entry
         const previousRow = rows[10] || rows[rows.length - 1]; // Row from 5 minutes ago or the oldest row available (if less than 11 rows)
 
-        // Straddle values
-        const straddles = {
-            atm_minus_3_straddle: currentRow.atm_minus_3_straddle,
-            atm_minus_2_straddle: currentRow.atm_minus_2_straddle,
-            atm_minus_1_straddle: currentRow.atm_minus_1_straddle,
-            atm_straddle: currentRow.atm_straddle,
-            atm_plus_1_straddle: currentRow.atm_plus_1_straddle,
-            atm_plus_2_straddle: currentRow.atm_plus_2_straddle,
-            atm_plus_3_straddle: currentRow.atm_plus_3_straddle
-        };
-
-        // Signal determination logic
-        let signal = 'No trend';
-
-        if (
-            straddles.atm_plus_3_straddle < straddles.atm_plus_2_straddle &&
-            straddles.atm_plus_2_straddle < straddles.atm_plus_1_straddle &&
-            straddles.atm_plus_1_straddle < straddles.atm_straddle
-        ) {
-            signal = 'Market will not fall, possibility of upside';
-            sendNotification(`${index} + ${signal}`);
-        } else if (
-            straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
-            straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
-            straddles.atm_minus_1_straddle < straddles.atm_straddle
-        ) {
-            signal = 'Bearish trend';
-            sendNotification(`${index} + ${signal}`);
-        } else if (
-            straddles.atm_plus_3_straddle > straddles.atm_plus_2_straddle &&
-            straddles.atm_plus_2_straddle > straddles.atm_plus_1_straddle &&
-            straddles.atm_plus_1_straddle > straddles.atm_straddle &&
-            straddles.atm_minus_3_straddle > straddles.atm_minus_2_straddle &&
-            straddles.atm_minus_2_straddle > straddles.atm_minus_1_straddle &&
-            straddles.atm_minus_1_straddle > straddles.atm_straddle
-        ) {
-            signal = 'Breakout';
-            sendNotification(`${index} + ${signal}`);
-        } else if (
-            straddles.atm_plus_3_straddle < straddles.atm_plus_2_straddle &&
-            straddles.atm_plus_2_straddle < straddles.atm_plus_1_straddle &&
-            straddles.atm_plus_1_straddle < straddles.atm_straddle &&
-            straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
-            straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
-            straddles.atm_minus_1_straddle < straddles.atm_straddle
-        ) {
-            signal = 'Market is range bound';
-         //   sendNotification(`${index} + ${signal}`);
-        }
-
         const result = [
             {
                 strike: 'S-3',
-                value: straddles.atm_minus_3_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_minus_3_straddle, previousRow.atm_minus_3_straddle)
+                value: currentRow.atm_minus_3_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_3_straddle, previousRow.atm_minus_3_straddle)
             },
             {
                 strike: 'S-2',
-                value: straddles.atm_minus_2_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_minus_2_straddle, previousRow.atm_minus_2_straddle)
+                value: currentRow.atm_minus_2_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow.atm_minus_2_straddle)
             },
             {
                 strike: 'S-1',
-                value: straddles.atm_minus_1_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_minus_1_straddle, previousRow.atm_minus_1_straddle)
+                value: currentRow.atm_minus_1_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow.atm_minus_1_straddle)
             },
             {
                 strike: 'S0',
-                value: straddles.atm_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_straddle, previousRow.atm_straddle)
+                value: currentRow.atm_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow.atm_straddle)
             },
             {
                 strike: 'S+1',
-                value: straddles.atm_plus_1_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_plus_1_straddle, previousRow.atm_plus_1_straddle)
+                value: currentRow.atm_plus_1_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow.atm_plus_1_straddle)
             },
             {
                 strike: 'S+2',
-                value: straddles.atm_plus_2_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_plus_2_straddle, previousRow.atm_plus_2_straddle)
+                value: currentRow.atm_plus_2_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow.atm_plus_2_straddle)
             },
             {
                 strike: 'S+3',
-                value: straddles.atm_plus_3_straddle,
-                changePercentage: calculatePercentageChange(straddles.atm_plus_3_straddle, previousRow.atm_plus_3_straddle)
+                value: currentRow.atm_plus_3_straddle,
+                changePercentage: calculatePercentageChange(currentRow.atm_plus_3_straddle, previousRow.atm_plus_3_straddle)
             }
         ];
 
-        res.json({ straddles: result, signal });
+        res.json(result);
     });
 
     db.close();
 });
+
 
 
 //API route to fetch initial vlaues for the straddle data
@@ -1254,10 +926,10 @@ app.get('/api/initial-values', (req, res) => {
             return res.status(404).send('No data found between 09:20 AM and 09:21 AM.');
         }
 
-        const a = row.bull_spread * process.env.UPPER_RANGE;
-        const b = row.bull_spread * process.env.LOWER_RANGE;
-        const c = row.bear_spread * process.env.UPPER_RANGE;
-        const d = row.bear_spread * process.env.LOWER_RANGE;
+        const a = row.bull_spread * 1.15;
+        const b = row.bull_spread * 0.85;
+        const c = row.bear_spread * 1.15;
+        const d = row.bear_spread * 0.85;
 
         res.json({
             a,
@@ -1295,92 +967,6 @@ app.get('/api/live-values', (req, res) => {
         const bear_spread_ema = row.bear_spread_ema;
 
         res.json({ e, f, bull_spread_ema, bear_spread_ema });
-    });
-
-    db.close();
-});
-
-
-//merged api for getting the initial value and last live values , the 2 api's merged into 1
-app.get('/api/combined-values', (req, res) => {
-    const { index, date } = req.query;
-
-    if (!index || !date) {
-        return res.status(400).send('Invalid or missing parameters.');
-    }
-
-    const db = new sqlite3.Database(`${index}.db`);
-
-    // Query to get initial values
-    const getInitialValuesQuery = `
-        SELECT * 
-        FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        AND timestamp >= '9:20:00' 
-        AND timestamp < '9:22:00'
-        LIMIT 1
-    `;
-
-    // Query to get the latest values
-    const getLatestValuesQuery = `
-        SELECT * FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        ORDER BY rowid DESC LIMIT 1
-    `;
-
-    // Execute both queries
-    db.get(getInitialValuesQuery, [date], (err, initialRow) => {
-        if (err) {
-            console.error(err.message);
-            db.close(); // Close the database connection on error
-            return res.status(500).send('An error occurred while fetching initial values.');
-        }
-
-        if (!initialRow) {
-            db.close(); // Close the database connection on error
-            return res.status(404).send('No data found between 09:20 AM and 09:21 AM.');
-        }
-
-        const a = initialRow.bull_spread * process.env.UPPER_RANGE;
-        const b = initialRow.bull_spread * process.env.LOWER_RANGE;
-        const c = initialRow.bear_spread * process.env.UPPER_RANGE;
-        const d = initialRow.bear_spread * process.env.LOWER_RANGE;
-
-        // Fetch the latest values after getting the initial values
-        db.get(getLatestValuesQuery, [date], (err, latestRow) => {
-            if (err) {
-                console.error(err.message);
-                db.close(); // Close the database connection on error
-                return res.status(500).send('An error occurred while fetching live values.');
-            }
-
-            if (!latestRow) {
-                return res.status(404).send('No live data found for the selected date.');
-            }
-
-            const e = latestRow.bull_spread;
-            const f = latestRow.bear_spread;
-            const bull_spread_ema = latestRow.bull_spread_ema;
-            const bear_spread_ema = latestRow.bear_spread_ema;
-
-            // Determine the signal based on the values
-            let signal = 'No Trend';
-
-            if (bull_spread_ema > a) {
-                signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
-               // sendNotification(signal);
-            } else if (bear_spread_ema > c) {
-                signal = `${index} : BEARISH --> Buy PE OR BEAR PUT SPREAD`;
-               // sendNotification(signal);
-            }
-
-            // Return the combined data and signal
-            res.json({ 
-                initialValues: { a, b, c, d },
-                latestValues: { e, f, bull_spread_ema, bear_spread_ema },
-                signal 
-            });
-        });
     });
 
     db.close();
@@ -1465,14 +1051,4 @@ server.listen(port, () => {
 
 io.on('connection', (socket) => {
     console.log('a user connected');
-
-    // Listen for the alert event
-    socket.on('alert', (message) => {
-        // Broadcast the alert to all connected clients
-        io.emit('alert', message);
-    });
-
-    socket.on('disconnect', () => {
-        console.log('user disconnected');
-    });
 });
