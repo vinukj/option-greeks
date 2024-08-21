@@ -142,6 +142,10 @@ const insertOptionData = (db, tableName, optiondataToInsert) => {
         bull_spread,
         bear_spread_ema,
         bull_spread_ema,
+        delta_bull_spread,
+        delta_bear_spread,
+        gamma_bull_spread,
+        gamma_bear_spread,
         atm_straddle,
         atm_plus_1_straddle,
         atm_plus_2_straddle,
@@ -155,100 +159,29 @@ const insertOptionData = (db, tableName, optiondataToInsert) => {
     } = optiondataToInsert;
 
     db.run(`INSERT INTO ${tableName} (
-        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema,
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema, delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread,
         atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,atm_plus_3_straddle,
         atm_minus_1_straddle, atm_minus_2_straddle,atm_minus_3_straddle,base_atm, date_inserted, expiry
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?)`, [
-        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?)`, [
+        timestamp, call_premium, put_premium, bear_spread, bull_spread,bear_spread_ema,bull_spread_ema,delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread,
         atm_straddle, atm_plus_1_straddle, atm_plus_2_straddle,atm_plus_3_straddle,
         atm_minus_1_straddle, atm_minus_2_straddle,atm_minus_3_straddle,base_atm, date_inserted, expiry
     ]);
 };
 
-//Monitor Alerts
-const monitoringInterval = 30000; // Check every 30 seconds
-function monitorSignal(index) {
-    const todayDate = getTodayDate();
-    const db = new sqlite3.Database(`${index}.db`);
+// let previousBullBearSignals = {
+//     NIFTY: '',
+//     BANKNIFTY: '',
+//     FINNIFTY: '',
+//     MIDCPNIFTY: ''
+// };
 
-    // Query to get initial values
-    const getInitialValuesQuery = `
-        SELECT * 
-        FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        AND timestamp >= '9:20:00' 
-        AND timestamp < '9:22:00'
-        LIMIT 1
-    `;
-
-    // Query to get the latest values
-    const getLatestValuesQuery = `
-        SELECT * FROM OPTIONHEDGE 
-        WHERE date_inserted = ? 
-        ORDER BY rowid DESC LIMIT 1
-    `;
-
-    // Get initial values once when the server starts
-    db.get(getInitialValuesQuery, [todayDate], (err, initialRow) => {
-        if (err) {
-            console.error('Error fetching initial values:', err.message);
-            return;
-        }
-
-        if (!initialRow) {
-            console.error('No initial data found.');
-            return;
-        }
-
-        const a = initialRow.bull_spread * process.env.UPPER_RANGE;
-        const b = initialRow.bull_spread * process.env.LOWER_RANGE;
-        const c = initialRow.bear_spread * process.env.UPPER_RANGE;
-        const d = initialRow.bear_spread * process.env.LOWER_RANGE;
-
-        // Start monitoring for changes
-        setInterval(() => {
-            db.get(getLatestValuesQuery, [todayDate], (err, latestRow) => {
-                if (err) {
-                    console.error('Error fetching latest values:', err.message);
-                    return;
-                }
-
-                if (!latestRow) {
-                    console.error('No latest data found.');
-                    return;
-                }
-
-                const e = latestRow.bull_spread;
-                const f = latestRow.bear_spread;
-                const bull_spread_ema = latestRow.bull_spread_ema;
-                const bear_spread_ema = latestRow.bear_spread_ema;
-
-                // Determine the signal based on the values
-                let signal = 'No Trend';
-
-                if (bull_spread_ema > a) {
-                    signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
-                } else if (bear_spread_ema > c) {
-                    signal = `${index} : BEARISH -> Buy PE OR BEAR PUT SPREAD`;
-                }
-
-                // Send notification if there's a valid signal
-                if (signal !== 'No Trend') {
-                    sendNotification(signal);
-                }
-
-            });
-        }, monitoringInterval);
-
-    });
-
-    db.close();
-}
-
-// Start monitoring for each index
-monitorSignal('NIFTY');
-monitorSignal('BANKNIFTY');
-
+// let previousStraddleSignals = {
+//     NIFTY: '',
+//     BANKNIFTY: '',
+//     FINNIFTY: '',
+//     MIDCPNIFTY: ''
+// };
 
 
 //Fetching data from Aliceblue 1ly api 
@@ -296,6 +229,8 @@ const fetchOptionsData = async (name, expiry) => {
         const db = new sqlite3.Database(`${name}.db`);
         const strikeList = response.data.strike_list;
         const atmvalue = response.data.atm_values.strike_price;
+        const deltaCE = response.data.greeks.delta_ce;
+        const deltaPE = response.data.greeks.delta_pe;
         const vegaCE = response.data.greeks.vega_ce;
         const vegaPE = response.data.greeks.vega_pe;
         const gammaCE = response.data.greeks.gamma_ce;
@@ -387,6 +322,40 @@ const fetchOptionsData = async (name, expiry) => {
                 throw new Error('Position - 5 is less than 0 in ltpPE array');
             }
         }
+
+        function DeltaBullSpread(deltaCE, position) {
+            if (position + 4 < deltaCE.length) {
+                return Math.round(deltaCE[position] - deltaCE[position + 4]);
+            } else {
+                throw new Error('Position + 5 exceeds the length of deltaCE array');
+            }
+        }
+
+        function DeltaBearSpread(deltaPE, position) {
+            if (position - 5 >= 0) {
+                return Math.round(deltaPE[position] - deltaPE[position - 4]);
+            } else {
+                throw new Error('Position - 5 is less than 0 in deltaPE array');
+            }
+        }
+
+        function GammaBullSpread(gammaCE, position) {
+            if (position + 4 < gammaCE.length) {
+                return Math.round(gammaCE[position] - gammaCE[position + 4]);
+            } else {
+                throw new Error('Position + 5 exceeds the length of gammaCE array');
+            }
+        }
+
+        function GammaBearSpread(gammaPE, position) {
+            if (position - 5 >= 0) {
+                return Math.round(gammaPE[position] - gammaPE[position - 4]);
+            } else {
+                throw new Error('Position - 5 is less than 0 in gammaPE array');
+            }
+        }
+
+
 
         function Straddle(ltpCE, ltpPE, position) {
             if (position - 3 >= 0 && position + 3 < ltpCE.length && position + 3 < ltpPE.length) {
@@ -534,6 +503,13 @@ const fetchOptionsData = async (name, expiry) => {
         const bull_spread = BullSpread(ltpCE, position);
         const bear_spread = BearSpread(ltpPE, position);
         const straddleValues = Straddle(ltpCE, ltpPE, position);
+        const delta_bull_spread = DeltaBullSpread(deltaCE,position);
+        const delta_bear_spread = DeltaBearSpread(deltaPE,position);
+        const gamma_bull_spread = GammaBullSpread(gammaCE,position);
+        const gamma_bear_spread = GammaBearSpread(gammaPE,position);
+
+        console.log(` For ${name} : Delta Spread = ${delta_bull_spread} , ${delta_bear_spread}   and Gamma Spread =  ${gamma_bull_spread}, ${gamma_bear_spread}`);
+
 
         let bull_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bull_spread', bull_spread);
         let bear_spread_ema = await calculateEMA(db, 'OPTIONHEDGE', 'bear_spread', bear_spread);
@@ -596,6 +572,10 @@ const fetchOptionsData = async (name, expiry) => {
             bull_spread,
             bear_spread_ema,
             bull_spread_ema,
+            delta_bull_spread,
+            delta_bear_spread,
+            gamma_bull_spread,
+            gamma_bear_spread,
             atm_straddle: straddleValues.atm_straddle,
             atm_plus_1_straddle: straddleValues.atm_plus_1_straddle,
             atm_plus_2_straddle: straddleValues.atm_plus_2_straddle,
@@ -649,6 +629,10 @@ const fetchOptionsData = async (name, expiry) => {
                     bear_spread_ema REAL,
                     bull_spread REAL,
                     bull_spread_ema REAL,
+                    delta_bull_spread REAL,
+                    delta_bear_spread REAL,
+                    gamma_bull_spread REAL,
+                    gamma_bear_spread REAL,
                     atm_straddle REAL,
                     atm_plus_1_straddle REAL,
                     atm_plus_2_straddle REAL,
@@ -669,10 +653,10 @@ const fetchOptionsData = async (name, expiry) => {
             db.run(`
                 INSERT INTO OPTIONHEDGE (
                     timestamp, call_premium, put_premium, bear_spread, bear_spread_ema,
-                    bull_spread, bull_spread_ema, atm_straddle, atm_plus_1_straddle,
+                    bull_spread, bull_spread_ema, delta_bull_spread, delta_bear_spread, gamma_bull_spread,gamma_bear_spread,atm_straddle, atm_plus_1_straddle,
                     atm_plus_2_straddle, atm_minus_1_straddle, atm_minus_2_straddle,
                     atm_plus_3_straddle, atm_minus_3_straddle, base_atm, date_inserted, expiry
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?,?)
             `, [
                 optiondataToInsert.timestamp,
                 optiondataToInsert.call_premium,
@@ -681,6 +665,10 @@ const fetchOptionsData = async (name, expiry) => {
                 optiondataToInsert.bear_spread_ema,
                 optiondataToInsert.bull_spread,
                 optiondataToInsert.bull_spread_ema,
+                optiondataToInsert.delta_bull_spread,
+                optiondataToInsert.delta_bear_spread,
+                optiondataToInsert.gamma_bull_spread,
+                optiondataToInsert.gamma_bear_spread,
                 optiondataToInsert.atm_straddle,
                 optiondataToInsert.atm_plus_1_straddle,
                 optiondataToInsert.atm_plus_2_straddle,
@@ -905,6 +893,178 @@ startFetchingData('FINNIFTY', process.env.finnifty);
 startFetchingData('MIDCPNIFTY', process.env.midcpNifty);
 
 
+
+function evaluateBullBearSignal(a, b, c, d, bull_spread_ema, bear_spread_ema, index) {
+    let signal = 'No Trend';
+
+    if (bull_spread_ema > a) {
+        signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
+    } else if (bear_spread_ema > c) {
+        signal = `${index} : BEARISH -> Buy PE OR BEAR PUT SPREAD`;
+    }
+
+    return signal;
+}
+
+function evaluateStraddleSignal(straddles, index) {
+    let signal = 'No Trend';
+
+    if (
+        straddles.atm_plus_3_straddle < straddles.atm_plus_2_straddle &&
+        straddles.atm_plus_2_straddle < straddles.atm_plus_1_straddle &&
+        straddles.atm_plus_1_straddle < straddles.atm_straddle
+    ) {
+        signal = `${index}: Market will not fall, possibility of upside`;
+    } else if (
+        straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
+        straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
+        straddles.atm_minus_1_straddle < straddles.atm_straddle
+    ) {
+        signal = `${index}: Bearish trend`;
+    } else if (
+        straddles.atm_plus_3_straddle > straddles.atm_plus_2_straddle &&
+        straddles.atm_plus_2_straddle > straddles.atm_plus_1_straddle &&
+        straddles.atm_plus_1_straddle > straddles.atm_straddle &&
+        straddles.atm_minus_3_straddle > straddles.atm_minus_2_straddle &&
+        straddles.atm_minus_2_straddle > straddles.atm_minus_1_straddle &&
+        straddles.atm_minus_1_straddle > straddles.atm_straddle
+    ) {
+        signal = `${index}: Breakout`;
+    } else if (
+        straddles.atm_plus_3_straddle < straddles.atm_plus_2_straddle &&
+        straddles.atm_plus_2_straddle < straddles.atm_plus_1_straddle &&
+        straddles.atm_plus_1_straddle < straddles.atm_straddle &&
+        straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
+        straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
+        straddles.atm_minus_1_straddle < straddles.atm_straddle
+    ) {
+        signal = `${index}: Market is range bound`;
+    }
+
+    return signal;
+}
+
+
+
+//monitor the alerts
+
+// Store previous signals for comparison
+let previousBullBearSignals = {};
+let previousStraddleSignals = {};
+
+async function monitorSignals(index) {
+    console.log("Entering monitoring for:", index);
+    const todayDate = getTodayDate();
+    const dbPath = `${index}.db`;
+
+    // Open the database connection
+    const db = new sqlite3.Database(dbPath);
+
+    // Query to get initial values
+    const getInitialValuesQuery = `
+        SELECT * 
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        AND timestamp >= '9:20:00' 
+        AND timestamp < '9:22:00'
+        LIMIT 1
+    `;
+
+    // Query to get the latest values
+    const getLatestValuesQuery = `
+        SELECT * FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid DESC LIMIT 1
+    `;
+
+    // Fetch initial values once
+    db.get(getInitialValuesQuery, [todayDate], (err, initialRow) => {
+        if (err) {
+            console.error(err.message);
+            db.close();
+            return;
+        }
+
+        if (!initialRow) {
+            console.error('No initial values found for the day.');
+            db.close();
+            return;
+        }
+
+        const a = initialRow.bull_spread * process.env.UPPER_RANGE;
+        const b = initialRow.bull_spread * process.env.LOWER_RANGE;
+        const c = initialRow.bear_spread * process.env.UPPER_RANGE;
+        const d = initialRow.bear_spread * process.env.LOWER_RANGE;
+
+        setInterval(() => {
+            // Reopen the database connection inside the interval
+            const dbInterval = new sqlite3.Database(dbPath);
+
+            dbInterval.get(getLatestValuesQuery, [todayDate], (err, latestRow) => {
+                if (err) {
+                    console.error(err.message);
+                    dbInterval.close();
+                    return;
+                }
+
+                if (!latestRow) {
+                    console.error('No latest values found.');
+                    dbInterval.close();
+                    return;
+                }
+
+                const e = latestRow.bull_spread;
+                const f = latestRow.bear_spread;
+                const bull_spread_ema = latestRow.bull_spread_ema;
+                const bear_spread_ema = latestRow.bear_spread_ema;
+
+                // Evaluate Bull/Bear Spread EMA Signal
+                const bullBearSignal = evaluateBullBearSignal(a, b, c, d, bull_spread_ema, bear_spread_ema, index);
+
+                // Evaluate Straddle Signal
+                const straddles = {
+                    atm_minus_3_straddle: latestRow.atm_minus_3_straddle,
+                    atm_minus_2_straddle: latestRow.atm_minus_2_straddle,
+                    atm_minus_1_straddle: latestRow.atm_minus_1_straddle,
+                    atm_straddle: latestRow.atm_straddle,
+                    atm_plus_1_straddle: latestRow.atm_plus_1_straddle,
+                    atm_plus_2_straddle: latestRow.atm_plus_2_straddle,
+                    atm_plus_3_straddle: latestRow.atm_plus_3_straddle
+                };
+
+                const straddleSignal = evaluateStraddleSignal(straddles, index);
+                console.log("Straddle Signal ", straddleSignal);
+
+                // Check and send notifications for Bull/Bear signal
+                if (bullBearSignal !== previousBullBearSignals[index] && bullBearSignal !== 'No Trend') {
+                    sendNotification(bullBearSignal);
+                    previousBullBearSignals[index] = bullBearSignal;
+                }
+
+                // Check and send notifications for Straddle signal
+                if (straddleSignal !== previousStraddleSignals[index] && straddleSignal !== 'No Trend') {
+                    sendNotification(straddleSignal);
+                    previousStraddleSignals[index] = straddleSignal;
+                }
+
+                // Close the interval database connection
+                dbInterval.close();
+            });
+        }, 60000); // Polling interval
+    });
+}
+
+
+// Start monitoring signals for each index
+monitorSignals('NIFTY');
+monitorSignals('BANKNIFTY');
+monitorSignals('FINNIFTY');
+monitorSignals('MIDCPNIFTY');
+
+
+
+
+
 // Update .env file with new settings
 app.post('/update-settings', (req, res) => {
     const newSettings = req.body;
@@ -1044,71 +1204,6 @@ app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
 });
 
-// API route to fetch straddle data with percentage changes
-// app.get('/api/straddle-data', (req, res) => {
-//     const { index, date } = req.query;
-//     if (!index || !date) {
-//         return res.status(400).send('Invalid or missing parameters.');
-//     }
-
-//     const db = new sqlite3.Database(`${index}.db`);
-
-//     db.all(`SELECT * FROM OPTIONHEDGE WHERE date_inserted = ? ORDER BY rowid DESC LIMIT 11`, [date], (err, rows) => {
-//         if (err) {
-//             console.error(err.message);
-//             return res.status(500).send('An error occurred while fetching data.');
-//         }
-
-//         if (!rows || rows.length === 0) {
-//             return res.status(404).send('No data available for the selected date.');
-//         }
-
-//         const currentRow = rows[0]; // Most recent entry
-//         const previousRow = rows[10] || rows[rows.length - 1]; // Row from 5 minutes ago or the oldest row available (if less than 11 rows)
-
-//         const result = [
-//             {
-//                 strike: 'S-3',
-//                 value: currentRow.atm_minus_3_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_3_straddle, previousRow.atm_minus_3_straddle)
-//             },
-//             {
-//                 strike: 'S-2',
-//                 value: currentRow.atm_minus_2_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_2_straddle, previousRow.atm_minus_2_straddle)
-//             },
-//             {
-//                 strike: 'S-1',
-//                 value: currentRow.atm_minus_1_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_minus_1_straddle, previousRow.atm_minus_1_straddle)
-//             },
-//             {
-//                 strike: 'S0',
-//                 value: currentRow.atm_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_straddle, previousRow.atm_straddle)
-//             },
-//             {
-//                 strike: 'S+1',
-//                 value: currentRow.atm_plus_1_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_1_straddle, previousRow.atm_plus_1_straddle)
-//             },
-//             {
-//                 strike: 'S+2',
-//                 value: currentRow.atm_plus_2_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_2_straddle, previousRow.atm_plus_2_straddle)
-//             },
-//             {
-//                 strike: 'S+3',
-//                 value: currentRow.atm_plus_3_straddle,
-//                 changePercentage: calculatePercentageChange(currentRow.atm_plus_3_straddle, previousRow.atm_plus_3_straddle)
-//             }
-//         ];
-
-//         res.json(result);
-//     });
-
-//     db.close();
-// });
 
 app.get('/api/straddle-data', (req, res) => {
     const { index, date } = req.query;
@@ -1151,14 +1246,14 @@ app.get('/api/straddle-data', (req, res) => {
             straddles.atm_plus_1_straddle < straddles.atm_straddle
         ) {
             signal = 'Market will not fall, possibility of upside';
-            sendNotification(`${index} + ${signal}`);
+           // sendNotification(`${index} + ${signal}`);
         } else if (
             straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
             straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
             straddles.atm_minus_1_straddle < straddles.atm_straddle
         ) {
             signal = 'Bearish trend';
-            sendNotification(`${index} + ${signal}`);
+           // sendNotification(`${index} + ${signal}`);
         } else if (
             straddles.atm_plus_3_straddle > straddles.atm_plus_2_straddle &&
             straddles.atm_plus_2_straddle > straddles.atm_plus_1_straddle &&
@@ -1168,7 +1263,7 @@ app.get('/api/straddle-data', (req, res) => {
             straddles.atm_minus_1_straddle > straddles.atm_straddle
         ) {
             signal = 'Breakout';
-            sendNotification(`${index} + ${signal}`);
+           // sendNotification(`${index} + ${signal}`);
         } else if (
             straddles.atm_plus_3_straddle < straddles.atm_plus_2_straddle &&
             straddles.atm_plus_2_straddle < straddles.atm_plus_1_straddle &&
@@ -1313,7 +1408,7 @@ app.get('/api/combined-values', (req, res) => {
 
     // Query to get initial values
     const getInitialValuesQuery = `
-        SELECT * 
+        SELECT bull_spread, bear_spread, delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread 
         FROM OPTIONHEDGE 
         WHERE date_inserted = ? 
         AND timestamp >= '9:20:00' 
@@ -1323,7 +1418,8 @@ app.get('/api/combined-values', (req, res) => {
 
     // Query to get the latest values
     const getLatestValuesQuery = `
-        SELECT * FROM OPTIONHEDGE 
+        SELECT bull_spread, bear_spread, bull_spread_ema, bear_spread_ema, delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread 
+        FROM OPTIONHEDGE 
         WHERE date_inserted = ? 
         ORDER BY rowid DESC LIMIT 1
     `;
@@ -1337,14 +1433,15 @@ app.get('/api/combined-values', (req, res) => {
         }
 
         if (!initialRow) {
-            db.close(); // Close the database connection on error
+            db.close(); // Close the database connection if no data is found
             return res.status(404).send('No data found between 09:20 AM and 09:21 AM.');
         }
 
-        const a = initialRow.bull_spread * process.env.UPPER_RANGE;
-        const b = initialRow.bull_spread * process.env.LOWER_RANGE;
-        const c = initialRow.bear_spread * process.env.UPPER_RANGE;
-        const d = initialRow.bear_spread * process.env.LOWER_RANGE;
+        const { bull_spread, bear_spread, delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread } = initialRow;
+        const a = bull_spread * process.env.UPPER_RANGE;
+        const b = bull_spread * process.env.LOWER_RANGE;
+        const c = bear_spread * process.env.UPPER_RANGE;
+        const d = bear_spread * process.env.LOWER_RANGE;
 
         // Fetch the latest values after getting the initial values
         db.get(getLatestValuesQuery, [date], (err, latestRow) => {
@@ -1355,36 +1452,35 @@ app.get('/api/combined-values', (req, res) => {
             }
 
             if (!latestRow) {
+                db.close(); // Close the database connection if no data is found
                 return res.status(404).send('No live data found for the selected date.');
             }
 
-            const e = latestRow.bull_spread;
-            const f = latestRow.bear_spread;
-            const bull_spread_ema = latestRow.bull_spread_ema;
-            const bear_spread_ema = latestRow.bear_spread_ema;
+            const { bull_spread: e, bear_spread: f, bull_spread_ema, bear_spread_ema, delta_bull_spread: delta_e, delta_bear_spread: delta_f, gamma_bull_spread: gamma_e, gamma_bear_spread: gamma_f } = latestRow;
 
             // Determine the signal based on the values
             let signal = 'No Trend';
 
             if (bull_spread_ema > a) {
                 signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
-               // sendNotification(signal);
+                // sendNotification(signal);
             } else if (bear_spread_ema > c) {
                 signal = `${index} : BEARISH --> Buy PE OR BEAR PUT SPREAD`;
-               // sendNotification(signal);
+                // sendNotification(signal);
             }
 
             // Return the combined data and signal
-            res.json({ 
-                initialValues: { a, b, c, d },
-                latestValues: { e, f, bull_spread_ema, bear_spread_ema },
-                signal 
+            res.json({
+                initialValues: { a, b, c, d, delta_bull_spread, delta_bear_spread, gamma_bull_spread, gamma_bear_spread },
+                latestValues: { e, f, bull_spread_ema, bear_spread_ema, delta_e, delta_f, gamma_e, gamma_f },
+                signal
             });
+
+            db.close(); // Close the database connection after processing
         });
     });
-
-    db.close();
 });
+
 
 // Export data to excel
 app.get('/api/export-data', async (req, res) => {

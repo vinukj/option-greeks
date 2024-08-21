@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="option.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="icon" href="img.ico" type="image/x-icon">
+    <title>Option Greeks Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+
+<body>
+    <!-- Audio element to play the sound -->
+    <audio id="alert-sound" src="A1.mp3" preload="auto"></audio>
+
+    <!-- Placeholder for the alert message -->
+    <div id="alert-container"></div>
+
+    <div class="header">
+        <span id="current-date-time"></span>
+        <select id="index-select">
+            <option value="NIFTY">NIFTY</option>
+            <option value="BANKNIFTY">BANKNIFTY</option>
+            <option value="FINNIFTY">FINNIFTY</option>
+            <option value="MIDCPNIFTY">MIDCPNIFTY</option>
+        </select>
+        <span id="expiry-date"></span>
+        <div class="date-export-group">
+            <label for="date-select">Select Date for Export:</label>
+            <input type="date" id="date-select">
+            <button class="icon-button" id="export-button">
+                <span class="material-icons">file_download</span>
+            </button>
+        </div>
+        <a href="referential.html" class="referential-link">Referential</a>
+        <a href="index.html" class="home-link">Home</a>
+    </div>
+
+    <div class="tables-container">
+        <div class="table-container">
+            <!-- First Table -->
+            <table>
+                <thead>
+                    <tr>
+                        <th>Market</th>
+                        <th>UC</th>
+                        <th>ES</th>
+                        <th>Delta</th>
+                        <th>Gamma</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Bull</td>
+                        <td id="bull-uc">Item</td>
+                        <td id="bull-es">Item</td>
+                        <td id="bull-delta">Item</td>
+                        <td id="bull-gamma">Item</td>
+                    </tr>
+                    <tr>
+                        <td>Bear</td>
+                        <td id="bear-uc">Item</td>
+                        <td id="bear-es">Item</td>
+                        <td id="bear-delta">Item</td>
+                        <td id="bear-gamma">Item</td>
+                    </tr>
+                    <tr>
+                        <td>Signal</td>
+                        <td colspan="4" id="market-signal"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="table-container">
+            <!-- Second Table -->
+            <table>
+                <thead>
+                    <tr>
+                        <th>Strike</th>
+                        <th>S-3</th>
+                        <th>S-2</th>
+                        <th>S-1</th>
+                        <th>S0</th>
+                        <th>S+1</th>
+                        <th>S+2</th>
+                        <th>S+3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Val</td>
+                        <td id="val-s-3">Item</td>
+                        <td id="val-s-2">Item</td>
+                        <td id="val-s-1">Item</td>
+                        <td id="val-s0">Item</td>
+                        <td id="val-s+1">Item</td>
+                        <td id="val-s+2">Item</td>
+                        <td id="val-s+3">Item</td>
+                    </tr>
+                    <tr>
+                        <td>Change</td>
+                        <td id="change-s-3">Item</td>
+                        <td id="change-s-2">Item</td>
+                        <td id="change-s-1">Item</td>
+                        <td id="change-s0">Item</td>
+                        <td id="change-s+1">Item</td>
+                        <td id="change-s+2">Item</td>
+                        <td id="change-s+3">Item</td>
+                    </tr>
+                    <tr>
+                        <td>Signal</td>
+                        <td colspan="7" id="strike-signal"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <div id="ltpChart"></div>
+    </div>
+    <script src="script.js"></script>
+    <script src="option1.js"></script>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        // Function to show the notification
+        function showNotification(message) {
+            if (Notification.permission === 'granted') {
+                const notification = new Notification('New Alert', {
+                    body: message,
+                    icon: '2image.png' // Optional: Path to an icon image
+                });
+
+                // Play the alert sound
+                const audio = document.getElementById('alert-sound');
+                audio.play();
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        showNotification(message);
+                    }
+                });
+            }
+        }
+
+        // Listen for the 'alert' event from the server
+        socket.on('alert', (message) => {
+            showNotification(message);
+            // Optionally, display the message in the DOM
+            //document.getElementById('alert-container').innerText = message;
+        });
+    </script>
+</body>
+
+</html>
