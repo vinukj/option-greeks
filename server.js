@@ -239,6 +239,7 @@ const fetchOptionsData = async (name, expiry) => {
         const thetaPE = response.data.greeks.theta_pe;
         const ltpCE = response.data.ltp_ce_list;
         const ltpPE = response.data.ltp_pe_list;
+        //console.log(`${name} the delta CE is ${deltaCE}`);
 
        const getSetBaseATM = async (db, atmvalue) => {
         return new Promise((resolve, reject) => {
@@ -325,15 +326,19 @@ const fetchOptionsData = async (name, expiry) => {
 
         function DeltaBullSpread(deltaCE, position) {
             if (position + 4 < deltaCE.length) {
-                return Math.round(deltaCE[position] - deltaCE[position + 4]);
+                // console.log(`Delta for ${name} at ${position} ${deltaCE[position]}`);
+                // console.log(`Delta for ${name} at ${position+4} ${deltaCE[position+4]}`);
+                // console.log((deltaCE[position] - deltaCE[position + 4]));
+                return (deltaCE[position] - deltaCE[position + 4]).toFixed(2);
             } else {
                 throw new Error('Position + 5 exceeds the length of deltaCE array');
             }
         }
+        
 
         function DeltaBearSpread(deltaPE, position) {
             if (position - 5 >= 0) {
-                return Math.round(deltaPE[position] - deltaPE[position - 4]);
+                return (deltaPE[position] - deltaPE[position - 4]).toFixed(2);
             } else {
                 throw new Error('Position - 5 is less than 0 in deltaPE array');
             }
@@ -341,7 +346,7 @@ const fetchOptionsData = async (name, expiry) => {
 
         function GammaBullSpread(gammaCE, position) {
             if (position + 4 < gammaCE.length) {
-                return Math.round(gammaCE[position] - gammaCE[position + 4]);
+                return (gammaCE[position] - gammaCE[position + 4]).toFixed(6);
             } else {
                 throw new Error('Position + 5 exceeds the length of gammaCE array');
             }
@@ -349,7 +354,7 @@ const fetchOptionsData = async (name, expiry) => {
 
         function GammaBearSpread(gammaPE, position) {
             if (position - 5 >= 0) {
-                return Math.round(gammaPE[position] - gammaPE[position - 4]);
+                return (gammaPE[position] - gammaPE[position - 4]).toFixed(6);
             } else {
                 throw new Error('Position - 5 is less than 0 in gammaPE array');
             }
@@ -948,10 +953,12 @@ function evaluateStraddleSignal(straddles, index) {
 
 //monitor the alerts
 
-// Store previous signals for comparison
+// Store previous signals and crossovers for comparison
 let previousBullBearSignals = {};
 let previousStraddleSignals = {};
+let lastCrossoverTimestamp = {};
 
+//function to monitor the changes for alerts
 async function monitorSignals(index) {
     console.log("Entering monitoring for:", index);
     const todayDate = getTodayDate();
@@ -970,11 +977,18 @@ async function monitorSignals(index) {
         LIMIT 1
     `;
 
-    // Query to get the latest values
+    // Query to get the latest values including delta and gamma spreads
     const getLatestValuesQuery = `
         SELECT * FROM OPTIONHEDGE 
         WHERE date_inserted = ? 
         ORDER BY rowid DESC LIMIT 1
+    `;
+
+    // Query to get values from 5 minutes ago (assuming 10 rows per 5 minutes)
+    const getPreviousValuesQuery = `
+        SELECT * FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid DESC LIMIT 10, 1
     `;
 
     // Fetch initial values once
@@ -1013,46 +1027,93 @@ async function monitorSignals(index) {
                     return;
                 }
 
-                const e = latestRow.bull_spread;
-                const f = latestRow.bear_spread;
-                const bull_spread_ema = latestRow.bull_spread_ema;
-                const bear_spread_ema = latestRow.bear_spread_ema;
+                dbInterval.get(getPreviousValuesQuery, [todayDate], (err, previousRow) => {
+                    if (err) {
+                        console.error(err.message);
+                        dbInterval.close();
+                        return;
+                    }
 
-                // Evaluate Bull/Bear Spread EMA Signal
-                const bullBearSignal = evaluateBullBearSignal(a, b, c, d, bull_spread_ema, bear_spread_ema, index);
+                    if (!previousRow) {
+                        console.error('No previous values found.');
+                        dbInterval.close();
+                        return;
+                    }
 
-                // Evaluate Straddle Signal
-                const straddles = {
-                    atm_minus_3_straddle: latestRow.atm_minus_3_straddle,
-                    atm_minus_2_straddle: latestRow.atm_minus_2_straddle,
-                    atm_minus_1_straddle: latestRow.atm_minus_1_straddle,
-                    atm_straddle: latestRow.atm_straddle,
-                    atm_plus_1_straddle: latestRow.atm_plus_1_straddle,
-                    atm_plus_2_straddle: latestRow.atm_plus_2_straddle,
-                    atm_plus_3_straddle: latestRow.atm_plus_3_straddle
-                };
+                    // Extract the latest and previous values
+                    const bull_spread_ema = latestRow.bull_spread_ema;
+                    const bear_spread_ema = latestRow.bear_spread_ema;
 
-                const straddleSignal = evaluateStraddleSignal(straddles, index);
-                console.log("Straddle Signal ", straddleSignal);
+                    const delta_bull_spread_change = latestRow.delta_bull_spread - previousRow.delta_bull_spread;
+                    const delta_bear_spread_change = latestRow.delta_bear_spread - previousRow.delta_bear_spread;
+                    const gamma_bull_spread_change = latestRow.gamma_bull_spread - previousRow.gamma_bull_spread;
+                    const gamma_bear_spread_change = latestRow.gamma_bear_spread - previousRow.gamma_bear_spread;
 
-                // Check and send notifications for Bull/Bear signal
-                if (bullBearSignal !== previousBullBearSignals[index] && bullBearSignal !== 'No Trend') {
-                    sendNotification(bullBearSignal);
-                    previousBullBearSignals[index] = bullBearSignal;
-                }
+                    // Determine the signal
+                    let bullBearSignal = 'No Trend';
+                    if (bull_spread_ema > a && delta_bull_spread_change > 0 && gamma_bull_spread_change > 0) {
+                        bullBearSignal = 'Buy CE, Bullish';
+                    } else if (bear_spread_ema > c && delta_bear_spread_change < 0 && gamma_bear_spread_change < 0) {
+                        bullBearSignal = 'Buy PE, Bearish';
+                    }
 
-                // Check and send notifications for Straddle signal
-                if (straddleSignal !== previousStraddleSignals[index] && straddleSignal !== 'No Trend') {
-                    sendNotification(straddleSignal);
-                    previousStraddleSignals[index] = straddleSignal;
-                }
+                    console.log("Bull/Bear Signal: ", bullBearSignal);
 
-                // Close the interval database connection
-                dbInterval.close();
+                    // Check and send notifications for Bull/Bear signal
+                    if (bullBearSignal !== previousBullBearSignals[index] && bullBearSignal !== 'No Trend') {
+                        sendNotification(`For ${index} ${bullBearSignal}`);
+                        previousBullBearSignals[index] = bullBearSignal;
+                    }
+
+                    // Crossover detection logic
+                    if (
+                        previousRow.bull_spread_ema !== null &&
+                        previousRow.bear_spread_ema !== null &&
+                        (
+                            (previousRow.bull_spread_ema <= previousRow.bear_spread_ema && bull_spread_ema > bear_spread_ema) ||
+                            (previousRow.bull_spread_ema >= previousRow.bear_spread_ema && bull_spread_ema < bear_spread_ema)
+                        )
+                    ) {
+                        const currentTime = new Date().getTime();
+
+                        if (!lastCrossoverTimestamp[index] || currentTime - lastCrossoverTimestamp[index] > 180000) { // 3 minutes = 180000 ms
+                            const crossoverSignal = bull_spread_ema > bear_spread_ema ? 'Bullish Crossover Detected' : 'Bearish Crossover Detected';
+                            sendNotification(`For ${index}  ${crossoverSignal} at '${currentTime}`);
+
+                            // Update the last crossover timestamp
+                            lastCrossoverTimestamp[index] = currentTime;
+                        }
+                    }
+
+                    // Evaluate Straddle Signal
+                    const straddles = {
+                        atm_minus_3_straddle: latestRow.atm_minus_3_straddle,
+                        atm_minus_2_straddle: latestRow.atm_minus_2_straddle,
+                        atm_minus_1_straddle: latestRow.atm_minus_1_straddle,
+                        atm_straddle: latestRow.atm_straddle,
+                        atm_plus_1_straddle: latestRow.atm_plus_1_straddle,
+                        atm_plus_2_straddle: latestRow.atm_plus_2_straddle,
+                        atm_plus_3_straddle: latestRow.atm_plus_3_straddle
+                    };
+
+                    const straddleSignal = evaluateStraddleSignal(straddles, index);
+                    console.log("S-Signal: ", straddleSignal);
+
+                    // Check and send notifications for Straddle signal
+                    if (straddleSignal !== previousStraddleSignals[index] && straddleSignal !== 'No Trend') {
+                        sendNotification(`For ${index}  ${straddleSignal}`);
+                        previousStraddleSignals[index] = straddleSignal;
+                    }
+
+                    // Close the interval database connection
+                    dbInterval.close();
+                });
             });
         }, 60000); // Polling interval
     });
 }
+
+
 
 
 // Start monitoring signals for each index
@@ -1205,6 +1266,8 @@ app.get('/', (req, res) => {
 });
 
 
+//straddle dta
+
 app.get('/api/straddle-data', (req, res) => {
     const { index, date } = req.query;
     if (!index || !date) {
@@ -1246,7 +1309,7 @@ app.get('/api/straddle-data', (req, res) => {
             straddles.atm_plus_1_straddle < straddles.atm_straddle
         ) {
             signal = 'Market will not fall, possibility of upside';
-           // sendNotification(`${index} + ${signal}`);
+           //sendNotification(`For ${index} + ${signal}`);
         } else if (
             straddles.atm_minus_3_straddle < straddles.atm_minus_2_straddle &&
             straddles.atm_minus_2_straddle < straddles.atm_minus_1_straddle &&
@@ -1320,6 +1383,115 @@ app.get('/api/straddle-data', (req, res) => {
     db.close();
 });
 
+
+
+app.get('/api/spread-data', (req, res) => {
+    const { index, date } = req.query;
+
+    if (!index || !date) {
+        return res.status(400).send('Invalid or missing parameters.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+
+    // Query to get the first value of the day
+    const getBaseQuery = `
+        SELECT bull_spread, bear_spread, call_premium, put_premium, timestamp
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid ASC 
+        LIMIT 1
+    `;
+
+    // Query to get all values of the day
+    const getAllValuesQuery = `
+        SELECT bull_spread, bear_spread, call_premium, put_premium, timestamp
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid ASC
+    `;
+
+    db.get(getBaseQuery, [date], (err, baseRow) => {
+        if (err) {
+            console.error(err.message);
+            db.close();
+            return res.status(500).send('An error occurred while fetching data.');
+        }
+
+        if (!baseRow) {
+            db.close();
+            return res.status(404).send('No data available for the selected date.');
+        }
+
+        const baseBullSpread = baseRow.bull_spread;
+        const baseBearSpread = baseRow.bear_spread;
+        const baseCallPremium = baseRow.call_premium;
+        const basePutPremium = baseRow.put_premium;
+
+        let lastBullSpreadChange = null;
+        let lastBearSpreadChange = null;
+        let lastCallPremiumChange = null;
+        let lastPutPremiumChange = null;
+
+        db.all(getAllValuesQuery, [date], (err, rows) => {
+            if (err) {
+                console.error(err.message);
+                db.close();
+                return res.status(500).send('An error occurred while fetching data.');
+            }
+
+            const spreadData = [];
+            const ltpData = [];
+
+            rows.forEach(row => {
+                let bullSpreadChange = Math.round(((row.bull_spread - baseBullSpread) / baseBullSpread) * 100);
+                let bearSpreadChange = Math.round(((row.bear_spread - baseBearSpread) / baseBearSpread) * 100);
+                let callPremiumChange = Math.round(((row.call_premium - baseCallPremium) / baseCallPremium) * 100);
+                let putPremiumChange = Math.round(((row.put_premium - basePutPremium) / basePutPremium) * 100);
+
+                // Use the last non-zero value if the current change is zero
+                if (bullSpreadChange === 0 && lastBullSpreadChange !== null) {
+                    bullSpreadChange = lastBullSpreadChange;
+                } else {
+                    lastBullSpreadChange = bullSpreadChange;
+                }
+
+                if (bearSpreadChange === 0 && lastBearSpreadChange !== null) {
+                    bearSpreadChange = lastBearSpreadChange;
+                } else {
+                    lastBearSpreadChange = bearSpreadChange;
+                }
+
+                if (callPremiumChange === 0 && lastCallPremiumChange !== null) {
+                    callPremiumChange = lastCallPremiumChange;
+                } else {
+                    lastCallPremiumChange = callPremiumChange;
+                }
+
+                if (putPremiumChange === 0 && lastPutPremiumChange !== null) {
+                    putPremiumChange = lastPutPremiumChange;
+                } else {
+                    lastPutPremiumChange = putPremiumChange;
+                }
+
+                spreadData.push({
+                    timestamp: row.timestamp,
+                    bullSpreadChange,
+                    bearSpreadChange
+                });
+
+                ltpData.push({
+                    timestamp: row.timestamp,
+                    callPremiumChange,
+                    putPremiumChange
+                });
+            });
+
+            res.json({ spreadData, ltpData });
+            db.close();
+        });
+    });
+});
 
 //API route to fetch initial vlaues for the straddle data
 app.get('/api/initial-values', (req, res) => {
@@ -1458,15 +1630,19 @@ app.get('/api/combined-values', (req, res) => {
 
             const { bull_spread: e, bear_spread: f, bull_spread_ema, bear_spread_ema, delta_bull_spread: delta_e, delta_bear_spread: delta_f, gamma_bull_spread: gamma_e, gamma_bear_spread: gamma_f } = latestRow;
 
+            // Calculate percentage change for delta and gamma spreads
+            const delta_bull_spread_change = ((delta_e - delta_bull_spread) / delta_bull_spread) * 100;
+            const delta_bear_spread_change = ((delta_f - delta_bear_spread) / delta_bear_spread) * 100;
+            const gamma_bull_spread_change = ((gamma_e - gamma_bull_spread) / gamma_bull_spread) * 100;
+            const gamma_bear_spread_change = ((gamma_f - gamma_bear_spread) / gamma_bear_spread) * 100;
+
             // Determine the signal based on the values
             let signal = 'No Trend';
 
-            if (bull_spread_ema > a) {
+            if (bull_spread_ema > a && delta_bull_spread_change > 0 && gamma_bull_spread_change > 0) {
                 signal = `${index} : BULLISH -> Buy CE OR BULL CALL SPREAD`;
-                // sendNotification(signal);
-            } else if (bear_spread_ema > c) {
+            } else if (bear_spread_ema > c && delta_bear_spread_change < 0 && gamma_bear_spread_change < 0) {
                 signal = `${index} : BEARISH --> Buy PE OR BEAR PUT SPREAD`;
-                // sendNotification(signal);
             }
 
             // Return the combined data and signal
@@ -1481,6 +1657,115 @@ app.get('/api/combined-values', (req, res) => {
     });
 });
 
+// to get the spread values 
+// to get the spread and LTP values
+app.get('/api/spread-data', (req, res) => {
+    const { index, date } = req.query;
+
+    if (!index || !date) {
+        return res.status(400).send('Invalid or missing parameters.');
+    }
+
+    const db = new sqlite3.Database(`${index}.db`);
+
+    // Query to get the first value of the day
+    const getBaseQuery = `
+        SELECT bull_spread, bear_spread, call_premium, put_premium, timestamp
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid ASC 
+        LIMIT 1
+    `;
+
+    // Query to get all values of the day
+    const getAllValuesQuery = `
+        SELECT bull_spread, bear_spread, call_premium, put_premium, timestamp
+        FROM OPTIONHEDGE 
+        WHERE date_inserted = ? 
+        ORDER BY rowid ASC
+    `;
+
+    db.get(getBaseQuery, [date], (err, baseRow) => {
+        if (err) {
+            console.error(err.message);
+            db.close();
+            return res.status(500).send('An error occurred while fetching data.');
+        }
+
+        if (!baseRow) {
+            db.close();
+            return res.status(404).send('No data available for the selected date.');
+        }
+
+        const baseBullSpread = baseRow.bull_spread;
+        const baseBearSpread = baseRow.bear_spread;
+        const baseCallPremium = baseRow.call_premium;
+        const basePutPremium = baseRow.put_premium;
+
+        let lastBullSpreadChange = null;
+        let lastBearSpreadChange = null;
+        let lastCallPremiumChange = null;
+        let lastPutPremiumChange = null;
+
+        db.all(getAllValuesQuery, [date], (err, rows) => {
+            if (err) {
+                console.error(err.message);
+                db.close();
+                return res.status(500).send('An error occurred while fetching data.');
+            }
+
+            const spreadData = [];
+            const ltpData = [];
+
+            rows.forEach(row => {
+                let bullSpreadChange = Math.round(((row.bull_spread - baseBullSpread) / baseBullSpread) * 100);
+                let bearSpreadChange = Math.round(((row.bear_spread - baseBearSpread) / baseBearSpread) * 100);
+                let callPremiumChange = Math.round(((row.call_premium - baseCallPremium) / baseCallPremium) * 100);
+                let putPremiumChange = Math.round(((row.put_premium - basePutPremium) / basePutPremium) * 100);
+
+                // Use the last non-zero value if the current change is zero
+                if (bullSpreadChange === 0 && lastBullSpreadChange !== null) {
+                    bullSpreadChange = lastBullSpreadChange;
+                } else {
+                    lastBullSpreadChange = bullSpreadChange;
+                }
+
+                if (bearSpreadChange === 0 && lastBearSpreadChange !== null) {
+                    bearSpreadChange = lastBearSpreadChange;
+                } else {
+                    lastBearSpreadChange = bearSpreadChange;
+                }
+
+                if (callPremiumChange === 0 && lastCallPremiumChange !== null) {
+                    callPremiumChange = lastCallPremiumChange;
+                } else {
+                    lastCallPremiumChange = callPremiumChange;
+                }
+
+                if (putPremiumChange === 0 && lastPutPremiumChange !== null) {
+                    putPremiumChange = lastPutPremiumChange;
+                } else {
+                    lastPutPremiumChange = putPremiumChange;
+                }
+
+                spreadData.push({
+                    timestamp: row.timestamp,
+                    bullSpreadChange,
+                    bearSpreadChange
+                });
+
+                ltpData.push({
+                    timestamp: row.timestamp,
+                    callPremiumChange,
+                    putPremiumChange
+                });
+            });
+
+            res.json({ spreadData, ltpData });
+            db.close();
+        });
+    });
+});
 
 // Export data to excel
 app.get('/api/export-data', async (req, res) => {
